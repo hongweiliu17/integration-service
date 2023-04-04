@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"fmt"
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -15,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/api/v1alpha1"
+	"github.com/redhat-appstudio/integration-service/api/v2alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
@@ -29,8 +30,8 @@ var _ = Describe("ScenarioController", func() {
 		req                ctrl.Request
 		scheme             runtime.Scheme
 		hasApp             *applicationapiv1alpha1.Application
-		hasScenario        *v1alpha1.IntegrationTestScenario
-		failScenario       *v1alpha1.IntegrationTestScenario
+		hasScenario        *v2alpha1.IntegrationTestScenario
+		failScenario       *v2alpha1.IntegrationTestScenario
 	)
 	const (
 		SampleRepoLink = "https://github.com/devfile-samples/devfile-sample-java-springboot-basic"
@@ -54,44 +55,71 @@ var _ = Describe("ScenarioController", func() {
 		Expect(k8sClient.Create(ctx, hasApp)).Should(Succeed())
 
 		scenarioName := "scenario-sample"
-		pipeline := "integration-pipeline-pass"
-		bundle := "quay.io/redhat-appstudio/example-tekton-bundle:integration-pipeline-pass"
 
-		hasScenario = &v1alpha1.IntegrationTestScenario{
+		hasScenario = &v2alpha1.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      scenarioName,
 				Namespace: "default",
 			},
-			Spec: v1alpha1.IntegrationTestScenarioSpec{
+			Spec: v2alpha1.IntegrationTestScenarioSpec{
 				Application: applicationName,
-				Pipeline:    pipeline,
-				Bundle:      bundle,
-				Environment: v1alpha1.TestEnvironment{
+				Environment: v2alpha1.TestEnvironment{
 					Name: "envname",
 					Type: "POC",
 					Configuration: applicationapiv1alpha1.EnvironmentConfiguration{
 						Env: []applicationapiv1alpha1.EnvVarPair{},
 					},
 				},
+				ResolverRef: v2alpha1.ResolverRef{
+					Resolver: "git",
+					Params: []v2alpha1.PipelineParameter{
+						{
+							Name:  "url",
+							Value: "https://url",
+						},
+						{
+							Name:  "branch",
+							Value: "main",
+						},
+						{
+							Name:  "pathInRepo",
+							Value: "pipeline/helloworld.yaml",
+						},
+					},
+				},
 			},
 		}
-
 		Expect(k8sClient.Create(ctx, hasScenario)).Should(Succeed())
 
-		failScenario = &v1alpha1.IntegrationTestScenario{
+		failScenario = &v2alpha1.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "failscenario",
 				Namespace: "default",
 			},
-			Spec: v1alpha1.IntegrationTestScenarioSpec{
+			Spec: v2alpha1.IntegrationTestScenarioSpec{
 				Application: "idontexist",
-				Pipeline:    pipeline,
-				Bundle:      bundle,
-				Environment: v1alpha1.TestEnvironment{
+				Environment: v2alpha1.TestEnvironment{
 					Name: "envname",
 					Type: "POC",
 					Configuration: applicationapiv1alpha1.EnvironmentConfiguration{
 						Env: []applicationapiv1alpha1.EnvVarPair{},
+					},
+				},
+				ResolverRef: v2alpha1.ResolverRef{
+					Resolver: "git",
+					Params: []v2alpha1.PipelineParameter{
+						{
+							Name:  "url",
+							Value: "https://url",
+						},
+						{
+							Name:  "branch",
+							Value: "main",
+						},
+						{
+							Name:  "pathInRepo",
+							Value: "pipeline/helloworld.yaml",
+						},
 					},
 				},
 			},
@@ -161,6 +189,7 @@ var _ = Describe("ScenarioController", func() {
 
 	It("can fail when Reconcile fails to prepare the adapter when app is not found", func() {
 		Expect(k8sClient.Delete(ctx, failScenario)).Should(Succeed())
+		fmt.Fprintf(GinkgoWriter, "failScenario: %v\n", failScenario)
 		Eventually(func() error {
 			_, err := scenarioReconciler.Reconcile(ctx, req)
 			return err
