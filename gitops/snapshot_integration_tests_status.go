@@ -21,9 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	intgteststat "github.com/konflux-ci/integration-service/pkg/integrationteststatus"
+	"github.com/konflux-ci/operator-toolkit/metadata"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	intgteststat "github.com/redhat-appstudio/integration-service/pkg/integrationteststatus"
-	"github.com/redhat-appstudio/operator-toolkit/metadata"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -47,7 +47,7 @@ func NewSnapshotIntegrationTestStatusesFromSnapshot(s *applicationapiv1alpha1.Sn
 
 // WriteIntegrationTestStatusesIntoSnapshot writes data to snapshot by updating CR
 // Data are written only when new changes are detected
-func WriteIntegrationTestStatusesIntoSnapshot(s *applicationapiv1alpha1.Snapshot, sts *intgteststat.SnapshotIntegrationTestStatuses, c client.Client, ctx context.Context) error {
+func WriteIntegrationTestStatusesIntoSnapshot(ctx context.Context, s *applicationapiv1alpha1.Snapshot, sts *intgteststat.SnapshotIntegrationTestStatuses, c client.Client) error {
 	if !sts.IsDirty() {
 		// No updates were done, we don't need to update snapshot
 		return nil

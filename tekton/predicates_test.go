@@ -19,9 +19,9 @@ package tekton_test
 import (
 	"time"
 
+	"github.com/konflux-ci/integration-service/tekton"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/redhat-appstudio/integration-service/tekton"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -367,5 +367,63 @@ var _ = Describe("Predicates", func() {
 			}
 			Expect(instance.Update(contextEvent)).To(BeFalse())
 		})
+	})
+
+	Context("when testing BuildPipelineRunDeletingPredicate", func() {
+		instance := tekton.BuildPipelineRunDeletingPredicate()
+
+		BeforeEach(func() {
+
+			pipelineRun = &tektonv1.PipelineRun{
+				ObjectMeta: v1.ObjectMeta{
+					GenerateName: prefix + "-",
+					Namespace:    namespace,
+					Labels: map[string]string{
+						"pipelines.appstudio.openshift.io/type": "build",
+					},
+					Annotations: map[string]string{},
+				},
+				Spec: tektonv1.PipelineRunSpec{},
+			}
+			newPipelineRun = pipelineRun.DeepCopy()
+		})
+
+		It("should ignore creation events", func() {
+			contextEvent := event.CreateEvent{
+				Object: pipelineRun,
+			}
+			Expect(instance.Create(contextEvent)).To(BeFalse())
+		})
+		It("should ignore deleting events", func() {
+			contextEvent := event.DeleteEvent{
+				Object: pipelineRun,
+			}
+			Expect(instance.Delete(contextEvent)).To(BeFalse())
+		})
+
+		It("should ignore generic events", func() {
+			contextEvent := event.GenericEvent{
+				Object: pipelineRun,
+			}
+			Expect(instance.Generic(contextEvent)).To(BeFalse())
+		})
+
+		It("should return false for an update event in which the build PLR has not been deleted", func() {
+			contextEvent := event.UpdateEvent{
+				ObjectOld: pipelineRun,
+				ObjectNew: newPipelineRun,
+			}
+			Expect(instance.Update(contextEvent)).To(BeFalse())
+		})
+
+		It("should return true for an update event marking build PLR for deletion", func() {
+			newPipelineRun.DeletionTimestamp = &v1.Time{Time: time.Now()}
+			contextEvent := event.UpdateEvent{
+				ObjectOld: pipelineRun,
+				ObjectNew: newPipelineRun,
+			}
+			Expect(instance.Update(contextEvent)).To(BeTrue())
+		})
+
 	})
 })

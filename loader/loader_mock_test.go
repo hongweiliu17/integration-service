@@ -17,13 +17,13 @@ limitations under the License.
 package loader
 
 import (
-	toolkit "github.com/redhat-appstudio/operator-toolkit/loader"
+	toolkit "github.com/konflux-ci/operator-toolkit/loader"
 
+	"github.com/konflux-ci/integration-service/api/v1beta2"
+	releasev1alpha1 "github.com/konflux-ci/release-service/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
-	releasev1alpha1 "github.com/redhat-appstudio/release-service/api/v1alpha1"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 )
 
@@ -36,21 +36,6 @@ var _ = Describe("Release Adapter", Ordered, func() {
 		loader = NewMockLoader()
 	})
 
-	Context("When calling GetAllEnvironments", func() {
-		It("returns resource and error from the context", func() {
-			environment := &applicationapiv1alpha1.Environment{}
-			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
-				{
-					ContextKey: EnvironmentContextKey,
-					Resource:   environment,
-				},
-			})
-			resource, err := loader.GetAllEnvironments(nil, mockContext, nil)
-			Expect(resource).To(Equal(&[]applicationapiv1alpha1.Environment{*environment}))
-			Expect(err).To(BeNil())
-		})
-	})
-
 	Context("When calling GetReleasesWithSnapshot", func() {
 		It("returns resource and error from the context", func() {
 			release := &releasev1alpha1.Release{}
@@ -60,7 +45,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   release,
 				},
 			})
-			resource, err := loader.GetReleasesWithSnapshot(nil, mockContext, nil)
+			resource, err := loader.GetReleasesWithSnapshot(mockContext, nil, nil)
 			Expect(resource).To(Equal(&[]releasev1alpha1.Release{*release}))
 			Expect(err).To(BeNil())
 		})
@@ -75,7 +60,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   applicationComponents,
 				},
 			})
-			resource, err := loader.GetAllApplicationComponents(nil, mockContext, nil)
+			resource, err := loader.GetAllApplicationComponents(mockContext, nil, nil)
 			Expect(resource).To(Equal(&applicationComponents))
 			Expect(err).To(BeNil())
 		})
@@ -90,7 +75,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   application,
 				},
 			})
-			resource, err := loader.GetApplicationFromSnapshot(nil, mockContext, nil)
+			resource, err := loader.GetApplicationFromSnapshot(mockContext, nil, nil)
 			Expect(resource).To(Equal(application))
 			Expect(err).To(BeNil())
 		})
@@ -105,7 +90,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   component,
 				},
 			})
-			resource, err := loader.GetComponentFromSnapshot(nil, mockContext, nil)
+			resource, err := loader.GetComponentFromSnapshot(mockContext, nil, nil)
 			Expect(resource).To(Equal(component))
 			Expect(err).To(BeNil())
 		})
@@ -120,7 +105,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   component,
 				},
 			})
-			resource, err := loader.GetComponentFromPipelineRun(nil, mockContext, nil)
+			resource, err := loader.GetComponentFromPipelineRun(mockContext, nil, nil)
 			Expect(resource).To(Equal(component))
 			Expect(err).To(BeNil())
 		})
@@ -135,7 +120,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   application,
 				},
 			})
-			resource, err := loader.GetApplicationFromPipelineRun(nil, mockContext, nil)
+			resource, err := loader.GetApplicationFromPipelineRun(mockContext, nil, nil)
 			Expect(resource).To(Equal(application))
 			Expect(err).To(BeNil())
 		})
@@ -150,23 +135,8 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   application,
 				},
 			})
-			resource, err := loader.GetApplicationFromComponent(nil, mockContext, nil)
+			resource, err := loader.GetApplicationFromComponent(mockContext, nil, nil)
 			Expect(resource).To(Equal(application))
-			Expect(err).To(BeNil())
-		})
-	})
-
-	Context("When calling GetEnvironmentFromIntegrationPipelineRun", func() {
-		It("returns resource and error from the context", func() {
-			environment := &applicationapiv1alpha1.Environment{}
-			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
-				{
-					ContextKey: EnvironmentContextKey,
-					Resource:   environment,
-				},
-			})
-			resource, err := loader.GetEnvironmentFromIntegrationPipelineRun(nil, mockContext, nil)
-			Expect(resource).To(Equal(environment))
 			Expect(err).To(BeNil())
 		})
 	})
@@ -180,37 +150,37 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   snapshot,
 				},
 			})
-			resource, err := loader.GetSnapshotFromPipelineRun(nil, mockContext, nil)
+			resource, err := loader.GetSnapshotFromPipelineRun(mockContext, nil, nil)
 			Expect(resource).To(Equal(snapshot))
 			Expect(err).To(BeNil())
 		})
 	})
 
-	Context("When calling FindAvailableDeploymentTargetClass", func() {
-		It("returns deploymentTargetClassre source and error from the context", func() {
-			dtcls := &applicationapiv1alpha1.DeploymentTargetClass{}
+	Context("When calling GetAllSnapshotsForBuildPipelineRun", func() {
+		It("returns resource and error from the context", func() {
+			snapshots := []applicationapiv1alpha1.Snapshot{}
 			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
 				{
-					ContextKey: DeploymentTargetClassContextKey,
-					Resource:   dtcls,
+					ContextKey: AllSnapshotsForBuildPipelineRunContextKey,
+					Resource:   snapshots,
 				},
 			})
-			resource, err := loader.FindAvailableDeploymentTargetClass(nil, mockContext)
-			Expect(resource).To(Equal(dtcls))
-			Expect(err).To(BeNil())
+			resource, err := loader.GetAllSnapshotsForBuildPipelineRun(mockContext, nil, nil)
+			Expect(resource).To(Equal(&snapshots))
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 
 	Context("When calling GetAllIntegrationTestScenariosForApplication", func() {
 		It("returns all integrationTestScenario and error from the context", func() {
-			scenarios := []v1beta1.IntegrationTestScenario{}
+			scenarios := []v1beta2.IntegrationTestScenario{}
 			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
 				{
 					ContextKey: AllIntegrationTestScenariosContextKey,
 					Resource:   scenarios,
 				},
 			})
-			resource, err := loader.GetAllIntegrationTestScenariosForApplication(nil, mockContext, nil)
+			resource, err := loader.GetAllIntegrationTestScenariosForApplication(mockContext, nil, nil)
 			Expect(resource).To(Equal(&scenarios))
 			Expect(err).To(BeNil())
 		})
@@ -218,60 +188,15 @@ var _ = Describe("Release Adapter", Ordered, func() {
 
 	Context("When calling GetRequiredIntegrationTestScenariosForApplication", func() {
 		It("returns required integrationTestScenario and error from the context", func() {
-			scenarios := []v1beta1.IntegrationTestScenario{}
+			scenarios := []v1beta2.IntegrationTestScenario{}
 			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
 				{
 					ContextKey: RequiredIntegrationTestScenariosContextKey,
 					Resource:   scenarios,
 				},
 			})
-			resource, err := loader.GetRequiredIntegrationTestScenariosForApplication(nil, mockContext, nil)
+			resource, err := loader.GetRequiredIntegrationTestScenariosForApplication(mockContext, nil, nil)
 			Expect(resource).To(Equal(&scenarios))
-			Expect(err).To(BeNil())
-		})
-	})
-
-	Context("When calling GetDeploymentTargetClaimForEnvironment", func() {
-		It("returns deploymentTargetClaim and error from the context", func() {
-			dtc := &applicationapiv1alpha1.DeploymentTargetClaim{}
-			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
-				{
-					ContextKey: DeploymentTargetClaimContextKey,
-					Resource:   dtc,
-				},
-			})
-			resource, err := loader.GetDeploymentTargetClaimForEnvironment(nil, mockContext, nil)
-			Expect(resource).To(Equal(dtc))
-			Expect(err).To(BeNil())
-		})
-	})
-
-	Context("When calling GetDeploymentTargetForDeploymentTargetClaim", func() {
-		It("returns deploymentTargetClaim and error from the context", func() {
-			dt := &applicationapiv1alpha1.DeploymentTarget{}
-			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
-				{
-					ContextKey: DeploymentTargetContextKey,
-					Resource:   dt,
-				},
-			})
-			resource, err := loader.GetDeploymentTargetForDeploymentTargetClaim(nil, mockContext, nil)
-			Expect(resource).To(Equal(dt))
-			Expect(err).To(BeNil())
-		})
-	})
-
-	Context("When calling FindExistingSnapshotEnvironmentBinding", func() {
-		It("returns existing snapshotEnvironmentBinding and error from the context", func() {
-			binding := &applicationapiv1alpha1.SnapshotEnvironmentBinding{}
-			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
-				{
-					ContextKey: SnapshotEnvironmentBindingContextKey,
-					Resource:   binding,
-				},
-			})
-			resource, err := loader.FindExistingSnapshotEnvironmentBinding(nil, mockContext, nil, nil)
-			Expect(resource).To(Equal(binding))
 			Expect(err).To(BeNil())
 		})
 	})
@@ -285,7 +210,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   prs,
 				},
 			})
-			resource, err := loader.GetAllPipelineRunsForSnapshotAndScenario(nil, mockContext, nil, nil)
+			resource, err := loader.GetAllPipelineRunsForSnapshotAndScenario(mockContext, nil, nil, nil)
 			Expect(resource).To(Equal(&prs))
 			Expect(err).To(BeNil())
 		})
@@ -300,7 +225,7 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   snapshots,
 				},
 			})
-			resource, err := loader.GetAllSnapshots(nil, mockContext, nil)
+			resource, err := loader.GetAllSnapshots(mockContext, nil, nil)
 			Expect(resource).To(Equal(&snapshots))
 			Expect(err).To(BeNil())
 		})
@@ -315,24 +240,54 @@ var _ = Describe("Release Adapter", Ordered, func() {
 					Resource:   releasePlans,
 				},
 			})
-			resource, err := loader.GetAutoReleasePlansForApplication(nil, mockContext, nil)
+			resource, err := loader.GetAutoReleasePlansForApplication(mockContext, nil, nil)
 			Expect(resource).To(Equal(&releasePlans))
 			Expect(err).To(BeNil())
 		})
 	})
 
-	Context("When calling GetAllBuildPipelineRunsForComponent", func() {
-		It("returns snapshots and error from the context", func() {
-			pipelineRuns := []tektonv1.PipelineRun{}
+	Context("When calling GetAllTaskRunsWithMatchingPipelineRunLabel", func() {
+		It("returns TaskRuns and error from the context", func() {
+			taskRuns := []tektonv1.TaskRun{}
 			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
 				{
-					ContextKey: PipelineRunsContextKey,
-					Resource:   pipelineRuns,
+					ContextKey: AllTaskRunsWithMatchingPipelineRunLabelContextKey,
+					Resource:   taskRuns,
 				},
 			})
-			resource, err := loader.GetAllBuildPipelineRunsForComponent(nil, mockContext, nil)
-			Expect(resource).To(Equal(&pipelineRuns))
-			Expect(err).To(BeNil())
+			resource, err := loader.GetAllTaskRunsWithMatchingPipelineRunLabel(mockContext, nil, nil)
+			Expect(resource).To(Equal(&taskRuns))
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("When calling GetPipelineRun", func() {
+		It("returns resource and error from the context", func() {
+			pipelineRun := &tektonv1.PipelineRun{}
+			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
+				{
+					ContextKey: GetPipelineRunContextKey,
+					Resource:   pipelineRun,
+				},
+			})
+			resource, err := loader.GetPipelineRun(mockContext, nil, "", "")
+			Expect(resource).To(Equal(pipelineRun))
+			Expect(err).ToNot(HaveOccurred())
+		})
+	})
+
+	Context("When calling GetComponent", func() {
+		It("returns resource and error from the context", func() {
+			component := &applicationapiv1alpha1.Component{}
+			mockContext := toolkit.GetMockedContext(ctx, []toolkit.MockData{
+				{
+					ContextKey: GetComponentContextKey,
+					Resource:   component,
+				},
+			})
+			resource, err := loader.GetComponent(mockContext, nil, "", "")
+			Expect(resource).To(Equal(component))
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 })

@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	intgteststat "github.com/redhat-appstudio/integration-service/pkg/integrationteststatus"
+	intgteststat "github.com/konflux-ci/integration-service/pkg/integrationteststatus"
 )
 
 var _ = Describe("integrationteststatus library unittests", func() {
@@ -40,11 +40,12 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			},
 			Entry("When status is Pending", intgteststat.IntegrationTestStatusPending, "Pending"),
 			Entry("When status is InProgress", intgteststat.IntegrationTestStatusInProgress, "InProgress"),
-			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError, "EnvironmentProvisionError"),
-			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError, "DeploymentError"),
+			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError_Deprecated, "EnvironmentProvisionError"),
+			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError_Deprecated, "DeploymentError"),
 			Entry("When status is TestFail", intgteststat.IntegrationTestStatusTestFail, "TestFail"),
 			Entry("When status is TestPass", intgteststat.IntegrationTestStatusTestPassed, "TestPassed"),
 			Entry("When status is Deleted", intgteststat.IntegrationTestStatusDeleted, "Deleted"),
+			Entry("When status is Invalid", intgteststat.IntegrationTestStatusTestInvalid, "TestInvalid"),
 		)
 
 		DescribeTable("Status to JSON and vice versa",
@@ -60,11 +61,26 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			},
 			Entry("When status is Pending", intgteststat.IntegrationTestStatusPending, "Pending"),
 			Entry("When status is InProgress", intgteststat.IntegrationTestStatusInProgress, "InProgress"),
-			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError, "EnvironmentProvisionError"),
-			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError, "DeploymentError"),
+			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError_Deprecated, "EnvironmentProvisionError"),
+			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError_Deprecated, "DeploymentError"),
 			Entry("When status is TestFail", intgteststat.IntegrationTestStatusTestFail, "TestFail"),
 			Entry("When status is TestPass", intgteststat.IntegrationTestStatusTestPassed, "TestPassed"),
 			Entry("When status is Deleted", intgteststat.IntegrationTestStatusDeleted, "Deleted"),
+			Entry("When status is Invalid", intgteststat.IntegrationTestStatusTestInvalid, "TestInvalid"),
+		)
+
+		DescribeTable("Check IsFinal logic",
+			func(st intgteststat.IntegrationTestStatus, isFinal bool) {
+				result := st.IsFinal()
+				Expect(result).To(Equal(isFinal))
+			},
+			Entry("When status is Deleted", intgteststat.IntegrationTestStatusDeleted, true),
+			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError_Deprecated, true),
+			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError_Deprecated, true),
+			Entry("When status is TestFail", intgteststat.IntegrationTestStatusTestFail, true),
+			Entry("When status is TestPass", intgteststat.IntegrationTestStatusTestPassed, true),
+			Entry("When status is Invalid", intgteststat.IntegrationTestStatusTestInvalid, true),
+			Entry("When status is Other", intgteststat.IntegrationTestStatusPending, false),
 		)
 
 		It("Invalid status to type fails with error", func() {
@@ -125,9 +141,9 @@ var _ = Describe("integrationteststatus library unittests", func() {
 		})
 
 		It("Can add new scenario test status", func() {
-			Expect(len(sits.GetStatuses())).To(Equal(0))
+			Expect(sits.GetStatuses()).To(BeEmpty())
 			sits.UpdateTestStatusIfChanged(testScenarioName, intgteststat.IntegrationTestStatusPending, testDetails)
-			Expect(len(sits.GetStatuses())).To(Equal(1))
+			Expect(sits.GetStatuses()).To(HaveLen(1))
 
 			detail, ok := sits.GetScenarioStatus(testScenarioName)
 			Expect(ok).To(BeTrue())
@@ -135,7 +151,7 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			Expect(detail.Status).To(Equal(intgteststat.IntegrationTestStatusPending))
 		})
 
-		DescribeTable("Test expected additons of startTime",
+		DescribeTable("Test expected additions of startTime",
 			func(st intgteststat.IntegrationTestStatus, shouldAdd bool) {
 				sits.UpdateTestStatusIfChanged(testScenarioName, st, testDetails)
 				detail, ok := sits.GetScenarioStatus(testScenarioName)
@@ -148,14 +164,15 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			},
 			Entry("When status is Pending", intgteststat.IntegrationTestStatusPending, false),
 			Entry("When status is InProgress", intgteststat.IntegrationTestStatusInProgress, true),
-			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError, false),
-			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError, false),
+			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError_Deprecated, false),
+			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError_Deprecated, false),
 			Entry("When status is TestFail", intgteststat.IntegrationTestStatusTestFail, false),
 			Entry("When status is TestPass", intgteststat.IntegrationTestStatusTestPassed, false),
 			Entry("When status is Deleted", intgteststat.IntegrationTestStatusDeleted, false),
+			Entry("When status is Invalid", intgteststat.IntegrationTestStatusTestInvalid, false),
 		)
 
-		DescribeTable("Test expected additons of completionTime",
+		DescribeTable("Test expected additions of completionTime",
 			func(st intgteststat.IntegrationTestStatus, shouldAdd bool) {
 				sits.UpdateTestStatusIfChanged(testScenarioName, st, testDetails)
 				detail, ok := sits.GetScenarioStatus(testScenarioName)
@@ -168,11 +185,12 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			},
 			Entry("When status is Pending", intgteststat.IntegrationTestStatusPending, false),
 			Entry("When status is InProgress", intgteststat.IntegrationTestStatusInProgress, false),
-			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError, true),
-			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError, true),
+			Entry("When status is EnvironmentProvisionError", intgteststat.IntegrationTestStatusEnvironmentProvisionError_Deprecated, true),
+			Entry("When status is DeploymentError", intgteststat.IntegrationTestStatusDeploymentError_Deprecated, true),
 			Entry("When status is TestFail", intgteststat.IntegrationTestStatusTestFail, true),
 			Entry("When status is TestPass", intgteststat.IntegrationTestStatusTestPassed, true),
 			Entry("When status is Deleted", intgteststat.IntegrationTestStatusDeleted, true),
+			Entry("When status is Invalid", intgteststat.IntegrationTestStatusTestInvalid, true),
 		)
 
 		It("Change back to InProgress updates timestamps accordingly", func() {
@@ -382,7 +400,7 @@ var _ = Describe("integrationteststatus library unittests", func() {
 				Expect(sits.IsDirty()).To(BeTrue())
 			})
 
-			It("Status can be reseted as non-dirty", func() {
+			It("Status can be reset as non-dirty", func() {
 				sits.ResetDirty()
 				Expect(sits.IsDirty()).To(BeFalse())
 			})
@@ -410,8 +428,8 @@ var _ = Describe("integrationteststatus library unittests", func() {
 				// timestamp must be updated too
 				Expect(newSt.LastUpdateTime).NotTo(Equal(oldTimestamp))
 
-				// no changes to nuber of records
-				Expect(len(sits.GetStatuses())).To(Equal(1))
+				// no changes to number of records
+				Expect(sits.GetStatuses()).To(HaveLen(1))
 			})
 
 			It("Updating details of scenario is reflected", func() {
@@ -432,21 +450,21 @@ var _ = Describe("integrationteststatus library unittests", func() {
 				// timestamp must be updated too
 				Expect(newSt.LastUpdateTime).NotTo(Equal(oldTimestamp))
 
-				// no changes to nuber of records
-				Expect(len(sits.GetStatuses())).To(Equal(1))
+				// no changes to number of records
+				Expect(sits.GetStatuses()).To(HaveLen(1))
 			})
 
 			It("Scenario can be deleted", func() {
 				sits.ResetDirty()
 				sits.DeleteStatus(testScenarioName)
-				Expect(len(sits.GetStatuses())).To(Equal(0))
+				Expect(sits.GetStatuses()).To(BeEmpty())
 				Expect(sits.IsDirty()).To(BeTrue())
 			})
 
-			It("Initialization with empty scneario list will remove data", func() {
+			It("Initialization with empty scenario list will remove data", func() {
 				sits.ResetDirty()
 				sits.InitStatuses(&[]string{})
-				Expect(len(sits.GetStatuses())).To(Equal(0))
+				Expect(sits.GetStatuses()).To(BeEmpty())
 				Expect(sits.IsDirty()).To(BeTrue())
 			})
 
@@ -457,7 +475,7 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			sits.InitStatuses(&[]string{testScenarioName})
 
 			Expect(sits.IsDirty()).To(BeTrue())
-			Expect(len(sits.GetStatuses())).To(Equal(1))
+			Expect(sits.GetStatuses()).To(HaveLen(1))
 
 			statusDetail, ok := sits.GetScenarioStatus(testScenarioName)
 			Expect(ok).To(BeTrue())
@@ -469,7 +487,7 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			It("Returns empty test statuses", func() {
 				statuses, err := intgteststat.NewSnapshotIntegrationTestStatuses("[]")
 				Expect(err).To(BeNil())
-				Expect(len(statuses.GetStatuses())).To(Equal(0))
+				Expect(statuses.GetStatuses()).To(BeEmpty())
 			})
 		})
 
@@ -487,7 +505,7 @@ var _ = Describe("integrationteststatus library unittests", func() {
 			It("Returns expected test statuses", func() {
 				statuses, err := intgteststat.NewSnapshotIntegrationTestStatuses(jsondata)
 				Expect(err).To(BeNil())
-				Expect(len(statuses.GetStatuses())).To(Equal(1))
+				Expect(statuses.GetStatuses()).To(HaveLen(1))
 
 				statusDetail := statuses.GetStatuses()[0]
 				Expect(statusDetail.Status).To(Equal(intgteststat.IntegrationTestStatusInProgress))

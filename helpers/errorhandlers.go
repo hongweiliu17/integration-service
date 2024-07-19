@@ -14,15 +14,19 @@ limitations under the License.
 package helpers
 
 import (
+	"errors"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
-	ReasonEnvironmentNotInNamespace = "EnvironmentNotInNamespace"
-	ReasonUnknownError              = "UnknownError"
+	ReasonEnvironmentNotInNamespace     = "EnvironmentNotInNamespace"
+	ReasonMissingInfoInPipelineRunError = "MissingInfoInPipelineRunError"
+	ReasonInvalidImageDigestError       = "InvalidImageDigest"
+	ReasonMissingValidComponentError    = "MissingValidComponentError"
+	ReasonUnknownError                  = "UnknownError"
 )
 
 type IntegrationError struct {
@@ -35,8 +39,8 @@ func (ie *IntegrationError) Error() string {
 }
 
 func getReason(err error) string {
-	integrationErr, ok := err.(*IntegrationError)
-	if !ok {
+	var integrationErr *IntegrationError
+	if !errors.As(err, &integrationErr) {
 		return ReasonUnknownError
 	}
 	return integrationErr.Reason
@@ -53,11 +57,45 @@ func IsEnvironmentNotInNamespaceError(err error) bool {
 	return getReason(err) == ReasonEnvironmentNotInNamespace
 }
 
+func MissingInfoInPipelineRunError(pipelineRunName, paramName string) error {
+	return &IntegrationError{
+		Reason:  ReasonMissingInfoInPipelineRunError,
+		Message: fmt.Sprintf("Missing info %s from pipelinerun %s", paramName, pipelineRunName),
+	}
+}
+
+func IsMissingInfoInPipelineRunError(err error) bool {
+	return getReason(err) == ReasonMissingInfoInPipelineRunError
+}
+
+func NewInvalidImageDigestError(componentName, image_digest string) error {
+	return &IntegrationError{
+		Reason:  ReasonInvalidImageDigestError,
+		Message: fmt.Sprintf("%s is invalid container image digest from component %s", image_digest, componentName),
+	}
+}
+
+func IsInvalidImageDigestError(err error) bool {
+	return getReason(err) == ReasonInvalidImageDigestError
+}
+
+func NewMissingValidComponentError(componentName string) error {
+	return &IntegrationError{
+		Reason:  ReasonMissingValidComponentError,
+		Message: fmt.Sprintf("The only one component %s is invalid, valid .Spec.ContainerImage is missing", componentName),
+	}
+}
+
+func IsMissingValidComponentError(err error) bool {
+	return getReason(err) == ReasonMissingValidComponentError
+}
+
 func HandleLoaderError(logger IntegrationLogger, err error, resource, from string) (ctrl.Result, error) {
-	if errors.IsNotFound(err) {
-		logger.Info(fmt.Sprintf("Could not get %[1]s from %[2]s.  %[1]s may have been removed.  Declining to proceed with reconciliation", resource, from))
+	if k8serrors.IsNotFound(err) {
+		logger.Info(fmt.Sprintf("Could not get %[1]s from %[2]s.  %[1]s may have been removed.  Declining to proceed with reconciliation due to the error: %[3]v", resource, from, err))
 		return ctrl.Result{}, nil
 	}
+
 	logger.Error(err, fmt.Sprintf("Failed to get %s from the %s", resource, from))
 	return ctrl.Result{}, err
 }

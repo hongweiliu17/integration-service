@@ -1,6 +1,6 @@
-# AppStudio Integration Service
-The AppStudio Integration Service is a Kubernetes operator to control the integration and testing of AppStudio-managed 
-Application Component builds in Red Hat AppStudio.
+# Konflux Integration Service
+The Konflux Integration Service is a Kubernetes operator to control the integration and testing of Konflux-managed
+Application Component builds in Red Hat Konflux.
 
 ## Running, building and testing the operator
 
@@ -36,6 +36,19 @@ Or, in the case the image should be pushed to a different repository:
 $ IMG=quay.io/user/integration-service:my-tag make img-build
 $ IMG=quay.io/user/integration-service:my-tag make img-push
 ```
+
+### Adding/updating a dependency
+
+This repo uses vendoring, please add dependencies in the following way:
+
+```shell
+go get example.com/dep@v1.2.3
+go mod tidy
+go mod vendor
+git add vendor/
+```
+
+If you don't vendor dependencies, `go vet` will fail build.
 
 ### Running tests
 

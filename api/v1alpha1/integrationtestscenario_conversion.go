@@ -17,10 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/konflux-ci/integration-service/api/v1beta2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"reflect"
-
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
@@ -31,25 +29,21 @@ func (r *IntegrationTestScenario) SetupWebhookWithManager(mgr ctrl.Manager) erro
 		Complete()
 }
 
-// Hub marks this type as a conversion hub.
-// ConvertTo converts this ITS to the Hub version (v1beta1).
+// ConvertTo converts this ITS to the Hub version (v1beta2).
 func (src *IntegrationTestScenario) ConvertTo(dstRaw conversion.Hub) error {
-	dst := dstRaw.(*v1beta1.IntegrationTestScenario)
+	dst := dstRaw.(*v1beta2.IntegrationTestScenario)
 	dst.ObjectMeta = src.ObjectMeta
 	dst.Spec.Application = src.Spec.Application
-	dst.Status = v1beta1.IntegrationTestScenarioStatus{Conditions: make([]metav1.Condition, 0)}
+	dst.Status = v1beta2.IntegrationTestScenarioStatus{Conditions: make([]metav1.Condition, 0)}
 
-	if !reflect.ValueOf(src.Spec.Environment).IsZero() {
-		dst.Spec.Environment = v1beta1.TestEnvironment(src.Spec.Environment)
-	}
 	if src.Spec.Params != nil {
 		for _, par := range src.Spec.Params {
-			dst.Spec.Params = append(dst.Spec.Params, v1beta1.PipelineParameter(par))
+			dst.Spec.Params = append(dst.Spec.Params, v1beta2.PipelineParameter(par))
 		}
 	}
 	if src.Spec.Contexts != nil {
 		for _, par := range src.Spec.Contexts {
-			dst.Spec.Contexts = append(dst.Spec.Contexts, v1beta1.TestContext(par))
+			dst.Spec.Contexts = append(dst.Spec.Contexts, v1beta2.TestContext(par))
 		}
 	}
 
@@ -57,9 +51,9 @@ func (src *IntegrationTestScenario) ConvertTo(dstRaw conversion.Hub) error {
 		dst.Status.Conditions = append(dst.Status.Conditions, src.Status.Conditions...)
 	}
 
-	dst.Spec.ResolverRef = v1beta1.ResolverRef{
+	dst.Spec.ResolverRef = v1beta2.ResolverRef{
 		Resolver: "bundles",
-		Params: []v1beta1.ResolverParameter{
+		Params: []v1beta2.ResolverParameter{
 			{
 				Name:  "bundle",
 				Value: src.Spec.Bundle,
@@ -78,12 +72,9 @@ func (src *IntegrationTestScenario) ConvertTo(dstRaw conversion.Hub) error {
 }
 
 func (dst *IntegrationTestScenario) ConvertFrom(srcRaw conversion.Hub) error {
-	src := srcRaw.(*v1beta1.IntegrationTestScenario)
+	src := srcRaw.(*v1beta2.IntegrationTestScenario)
 	dst.ObjectMeta = src.ObjectMeta
 	dst.Spec.Application = src.Spec.Application
-	if !reflect.ValueOf(dst.Spec.Environment).IsZero() {
-		dst.Spec.Environment = TestEnvironment(src.Spec.Environment)
-	}
 	if src.Spec.Params != nil {
 		for _, par := range src.Spec.Params {
 			dst.Spec.Params = append(dst.Spec.Params, PipelineParameter(par))

@@ -27,11 +27,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	intgteststat "github.com/konflux-ci/integration-service/pkg/integrationteststatus"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	intgteststat "github.com/redhat-appstudio/integration-service/pkg/integrationteststatus"
 
-	"github.com/redhat-appstudio/integration-service/gitops"
-	"github.com/redhat-appstudio/operator-toolkit/metadata"
+	"github.com/konflux-ci/integration-service/gitops"
+	"github.com/konflux-ci/operator-toolkit/metadata"
 )
 
 var _ = Describe("Snapshot integration test statuses", func() {
@@ -81,7 +81,7 @@ var _ = Describe("Snapshot integration test statuses", func() {
 		It("Creates empty statuses when a snaphost doesn't have test status annotation", func() {
 			statuses, err := gitops.NewSnapshotIntegrationTestStatusesFromSnapshot(snapshot)
 			Expect(err).To(BeNil())
-			Expect(len(statuses.GetStatuses())).To(Equal(0))
+			Expect(statuses.GetStatuses()).To(BeEmpty())
 		})
 
 		When("Snapshot contains empty test status annotation", func() {
@@ -94,7 +94,7 @@ var _ = Describe("Snapshot integration test statuses", func() {
 			It("Returns empty test statuses", func() {
 				statuses, err := gitops.NewSnapshotIntegrationTestStatusesFromSnapshot(snapshot)
 				Expect(err).To(BeNil())
-				Expect(len(statuses.GetStatuses())).To(Equal(0))
+				Expect(statuses.GetStatuses()).To(BeEmpty())
 			})
 		})
 
@@ -111,7 +111,7 @@ var _ = Describe("Snapshot integration test statuses", func() {
 			It("Returns expected test statuses", func() {
 				statuses, err := gitops.NewSnapshotIntegrationTestStatusesFromSnapshot(snapshot)
 				Expect(err).To(BeNil())
-				Expect(len(statuses.GetStatuses())).To(Equal(1))
+				Expect(statuses.GetStatuses()).To(HaveLen(1))
 
 				statusDetail := statuses.GetStatuses()[0]
 				Expect(statusDetail.Status).To(Equal(intgteststat.IntegrationTestStatusInProgress))
@@ -169,7 +169,7 @@ var _ = Describe("Snapshot integration test statuses", func() {
 			It("Test results are written into snapshot", func() {
 				sits.UpdateTestStatusIfChanged(testScenarioName, intgteststat.IntegrationTestStatusInProgress, testDetails)
 
-				err := gitops.WriteIntegrationTestStatusesIntoSnapshot(snapshot, sits, k8sClient, ctx)
+				err := gitops.WriteIntegrationTestStatusesIntoSnapshot(ctx, snapshot, sits, k8sClient)
 				Expect(err).To(BeNil())
 				Expect(sits.IsDirty()).To(BeFalse())
 
@@ -191,7 +191,7 @@ var _ = Describe("Snapshot integration test statuses", func() {
 
 				statuses, err := gitops.NewSnapshotIntegrationTestStatusesFromSnapshot(snapshot)
 				Expect(err).To(BeNil())
-				Expect(len(statuses.GetStatuses())).To(Equal(1))
+				Expect(statuses.GetStatuses()).To(HaveLen(1))
 			})
 		})
 

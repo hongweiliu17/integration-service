@@ -24,6 +24,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/konflux-ci/integration-service/api/v1beta2"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/go-logr/logr"
@@ -91,7 +95,7 @@ var testResultSchema = `{
     },
     "timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{10}$"
+      "pattern": "^[0-9]{10}$|^((?:(\\d{4}-\\d{2}-\\d{2})T(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?))(Z|[\\+-]\\d{2}:\\d{2})?)$"
     },
     "successes": {
       "type": "integer",
@@ -136,6 +140,11 @@ func (t *TaskRun) GetStartTime() time.Time {
 		return time.Time{}
 	}
 	return t.trStatus.StartTime.Time
+}
+
+// GetStatusCondition returns the status condition of the TaskRun.
+func (t *TaskRun) GetStatusCondition(conditionName string) *apis.Condition {
+	return t.trStatus.GetCondition(apis.ConditionType(conditionName))
 }
 
 // GetDuration returns the time it took to execute the Task.
@@ -273,10 +282,10 @@ func (ipro *IntegrationPipelineRunOutcome) LogResults(logger logr.Logger) {
 	}
 }
 
-// GetIntegrationPipelineRunOutcome returns the IntegrationPipelineRunOutcome which can be used for further inspection of
-// the results and general outcome
+// GetIntegrationPipelineRunOutcome returns the IntegrationPipelineRunOutcome
+// which can be used for further inspection of the results and general outcome
 // This function must be called on the finished pipeline
-func GetIntegrationPipelineRunOutcome(adapterClient client.Client, ctx context.Context, pipelineRun *tektonv1.PipelineRun) (*IntegrationPipelineRunOutcome, error) {
+func GetIntegrationPipelineRunOutcome(ctx context.Context, adapterClient client.Client, pipelineRun *tektonv1.PipelineRun) (*IntegrationPipelineRunOutcome, error) {
 
 	// Check if the pipelineRun failed from the conditions of status
 	if !HasPipelineRunSucceeded(pipelineRun) {
@@ -289,7 +298,7 @@ func GetIntegrationPipelineRunOutcome(adapterClient client.Client, ctx context.C
 	// Check if the pipelineRun.Status contains the childReferences to TaskRuns
 	if !reflect.ValueOf(pipelineRun.Status.ChildReferences).IsZero() {
 		// If the pipelineRun.Status contains the childReferences, parse them in the new way by querying for TaskRuns
-		results, err := GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences(adapterClient, ctx, pipelineRun)
+		results, err := GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences(ctx, adapterClient, pipelineRun)
 		if err != nil {
 			return nil, fmt.Errorf("error while getting test results from pipelineRun %s: %w", pipelineRun.Name, err)
 		}
@@ -311,8 +320,8 @@ func GetIntegrationPipelineRunOutcome(adapterClient client.Client, ctx context.C
 // GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences finds all TaskRuns from childReferences of the PipelineRun
 // that also contain a TEST_OUTPUT result and returns the parsed data or validation error
 // returns map taskName: result
-func GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences(adapterClient client.Client, ctx context.Context, pipelineRun *tektonv1.PipelineRun) (map[string]*IntegrationTestTaskResult, error) {
-	taskRuns, err := GetAllChildTaskRunsForPipelineRun(adapterClient, ctx, pipelineRun)
+func GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences(ctx context.Context, adapterClient client.Client, pipelineRun *tektonv1.PipelineRun) (map[string]*IntegrationTestTaskResult, error) {
+	taskRuns, err := GetAllChildTaskRunsForPipelineRun(ctx, adapterClient, pipelineRun)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +341,7 @@ func GetIntegrationTestTaskResultsFromPipelineRunWithChildReferences(adapterClie
 
 // GetAllChildTaskRunsForPipelineRun finds all Child TaskRuns for a given PipelineRun and
 // returns integration TaskRun wrappers for them sorted by start time.
-func GetAllChildTaskRunsForPipelineRun(adapterClient client.Client, ctx context.Context, pipelineRun *tektonv1.PipelineRun) ([]*TaskRun, error) {
+func GetAllChildTaskRunsForPipelineRun(ctx context.Context, adapterClient client.Client, pipelineRun *tektonv1.PipelineRun) ([]*TaskRun, error) {
 	taskRuns := []*TaskRun{}
 	// If there are no childReferences, skip trying to get tasks
 	if reflect.ValueOf(pipelineRun.Status.ChildReferences).IsZero() {
@@ -365,19 +374,6 @@ func HasPipelineRunSucceeded(object client.Object) bool {
 	return false
 }
 
-// GetPipelineRunFailedReason returns a string indicating why the PipelineRun failed.
-// If the object passed to this function is not a PipelineRun, the function will return "".
-func GetPipelineRunFailedReason(object client.Object) string {
-	var reason string
-	reason = ""
-	if pr, ok := object.(*tektonv1.PipelineRun); ok {
-		if pr.Status.GetCondition(apis.ConditionSucceeded).IsFalse() {
-			reason = pr.Status.GetCondition(apis.ConditionSucceeded).GetReason()
-		}
-	}
-	return reason
-}
-
 // HasPipelineRunFinished returns a boolean indicating whether the PipelineRun finished or not.
 // If the object passed to this function is not a PipelineRun, the function will return false.
 func HasPipelineRunFinished(object client.Object) bool {
@@ -388,40 +384,10 @@ func HasPipelineRunFinished(object client.Object) bool {
 	return false
 }
 
-func IsEnvironmentEphemeral(testEnvironment *applicationapiv1alpha1.Environment) bool {
-	isEphemeral := false
-	for _, tag := range testEnvironment.Spec.Tags {
-		if tag == "ephemeral" {
-			isEphemeral = true
-			break
-		}
-	}
-	return isEphemeral
-}
-
-func CleanUpEphemeralEnvironments(client client.Client, logger *IntegrationLogger, ctx context.Context, env *applicationapiv1alpha1.Environment, dtc *applicationapiv1alpha1.DeploymentTargetClaim) error {
-	logger.Info("Deleting deploymentTargetClaim", "deploymentTargetClaim.Name", dtc.Name)
-	err := client.Delete(ctx, dtc)
-	if err != nil {
-		logger.Error(err, "Failed to delete the deploymentTargetClaim")
-		return err
-	}
-	logger.LogAuditEvent("DeploymentTargetClaim deleted", dtc, LogActionDelete)
-
-	logger.Info("Deleting environment", "environment.Name", env.Name)
-	err = client.Delete(ctx, env)
-	if err != nil {
-		logger.Error(err, "Failed to delete the test ephemeral environment and its owning snapshotEnvironmentBinding", "environment.Name", env.Name)
-		return err
-	}
-	logger.LogAuditEvent("Ephemeral environment is deleted and its owning SnapshotEnvironmentBinding is in the process of being deleted", env, LogActionDelete)
-	return nil
-}
-
 // RemoveFinalizerFromAllIntegrationPipelineRunsOfSnapshot fetches all the Integration
 // PipelineRuns associated with the given Snapshot. After fetching them, it removes the
 // finalizer from the PipelineRun, and returns error if any.
-func RemoveFinalizerFromAllIntegrationPipelineRunsOfSnapshot(adapterClient client.Client, logger IntegrationLogger, ctx context.Context, snapshot applicationapiv1alpha1.Snapshot, finalizer string) error {
+func RemoveFinalizerFromAllIntegrationPipelineRunsOfSnapshot(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, snapshot applicationapiv1alpha1.Snapshot, finalizer string) error {
 	integrationPipelineRuns := &tektonv1.PipelineRunList{}
 	opts := []client.ListOption{
 		client.InNamespace(snapshot.Namespace),
@@ -438,7 +404,7 @@ func RemoveFinalizerFromAllIntegrationPipelineRunsOfSnapshot(adapterClient clien
 	// Remove finalizer from each of the PipelineRuns
 	for _, pipelineRun := range integrationPipelineRuns.Items {
 		pipelineRun := pipelineRun
-		err = RemoveFinalizerFromPipelineRun(adapterClient, logger, ctx, &pipelineRun, finalizer)
+		err = RemoveFinalizerFromPipelineRun(ctx, adapterClient, logger, &pipelineRun, finalizer)
 		if err != nil {
 			return err
 		}
@@ -449,15 +415,22 @@ func RemoveFinalizerFromAllIntegrationPipelineRunsOfSnapshot(adapterClient clien
 
 // RemoveFinalizerFromPipelineRun removes the finalizer from the PipelineRun.
 // If finalizer was not removed successfully, a non-nil error is returned.
-func RemoveFinalizerFromPipelineRun(adapterClient client.Client, logger IntegrationLogger, ctx context.Context, pipelineRun *tektonv1.PipelineRun, finalizer string) error {
+func RemoveFinalizerFromPipelineRun(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, pipelineRun *tektonv1.PipelineRun, finalizer string) error {
+	if !controllerutil.ContainsFinalizer(pipelineRun, finalizer) {
+		return nil
+	}
+
 	patch := client.MergeFrom(pipelineRun.DeepCopy())
 	if ok := controllerutil.RemoveFinalizer(pipelineRun, finalizer); ok {
 		err := adapterClient.Patch(ctx, pipelineRun, patch)
 		if err != nil {
-			return fmt.Errorf("error occurred while patching the updated PipelineRun after finalizer removal: %w", err)
+			logger.Error(err, "error occurred while patching the updated PipelineRun after finalizer removal",
+				"pipelineRun.Name", pipelineRun.Name)
+			// don't return wrapped err, so we can use RetryOnConflict
+			return err
 		}
 
-		logger.LogAuditEvent("Removed Finalizer from the Integration PipelineRun", pipelineRun, LogActionUpdate, "finalizer", finalizer)
+		logger.LogAuditEvent("Removed Finalizer from the PipelineRun", pipelineRun, LogActionUpdate, "finalizer", finalizer)
 	}
 
 	return nil
@@ -465,7 +438,7 @@ func RemoveFinalizerFromPipelineRun(adapterClient client.Client, logger Integrat
 
 // AddFinalizerToPipelineRun adds the finalizer to the PipelineRun.
 // If finalizer was not added successfully, a non-nil error is returned.
-func AddFinalizerToPipelineRun(adapterClient client.Client, logger IntegrationLogger, ctx context.Context, pipelineRun *tektonv1.PipelineRun, finalizer string) error {
+func AddFinalizerToPipelineRun(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, pipelineRun *tektonv1.PipelineRun, finalizer string) error {
 	patch := client.MergeFrom(pipelineRun.DeepCopy())
 	if ok := controllerutil.AddFinalizer(pipelineRun, finalizer); ok {
 		err := adapterClient.Patch(ctx, pipelineRun, patch)
@@ -473,8 +446,62 @@ func AddFinalizerToPipelineRun(adapterClient client.Client, logger IntegrationLo
 			return fmt.Errorf("error occurred while patching the updated PipelineRun after finalizer addition: %w", err)
 		}
 
-		logger.LogAuditEvent("Added Finalizer to the Integration PipelineRun", pipelineRun, LogActionUpdate, "finalizer", finalizer)
+		logger.LogAuditEvent("Added Finalizer to the PipelineRun", pipelineRun, LogActionUpdate, "finalizer", finalizer)
+	}
+	return nil
+}
+
+// AddFinalizerToComponent adds the finalizer to the component.
+// If finalizer was not added successfully, a non-nil error is returned.
+func AddFinalizerToComponent(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, component *applicationapiv1alpha1.Component, finalizer string) error {
+	patch := client.MergeFrom(component.DeepCopy())
+	if ok := controllerutil.AddFinalizer(component, finalizer); ok {
+		err := adapterClient.Patch(ctx, component, patch)
+		if err != nil {
+			return fmt.Errorf("error occurred while patching the updated component after finalizer addition: %w", err)
+		}
+
+		logger.LogAuditEvent("Added Finalizer to the Component", component, LogActionUpdate, "finalizer", finalizer)
 	}
 
 	return nil
+}
+
+// RemoveFinalizerFromComponent removes the finalizer from the Component.
+// If finalizer was not removed successfully, a non-nil error is returned.
+func RemoveFinalizerFromComponent(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, component *applicationapiv1alpha1.Component, finalizer string) error {
+	patch := client.MergeFrom(component.DeepCopy())
+	if ok := controllerutil.RemoveFinalizer(component, finalizer); ok {
+		err := adapterClient.Patch(ctx, component, patch)
+		if err != nil {
+			return fmt.Errorf("error occurred while patching the updated Component after finalizer removal: %w", err)
+		}
+
+		logger.LogAuditEvent("Removed Finalizer from the Component", component, LogActionDelete, "finalizer", finalizer)
+	}
+
+	return nil
+}
+
+// RemoveFinalizerFromScenario removes the finalizer from the IntegrationTestScenario.
+// If finalizer was not removed successfully, a non-nil error is returned.
+func RemoveFinalizerFromScenario(ctx context.Context, adapterClient client.Client, logger IntegrationLogger, scenario *v1beta2.IntegrationTestScenario, finalizer string) error {
+	patch := client.MergeFrom(scenario.DeepCopy())
+	if ok := controllerutil.RemoveFinalizer(scenario, finalizer); ok {
+		err := adapterClient.Patch(ctx, scenario, patch)
+		if err != nil {
+			return fmt.Errorf("error occurred while patching the updated IntegrationTestScenario after finalizer removal: %w", err)
+		}
+
+		logger.LogAuditEvent("Removed Finalizer from the IntegrationTestScenario", scenario, LogActionUpdate, "finalizer", finalizer)
+	}
+
+	return nil
+}
+
+func IsObjectYoungerThanThreshold(obj metav1.Object, threshold time.Duration) bool {
+	objectCreationTime := obj.GetCreationTimestamp().Time
+	durationSinceObjectCreation := time.Since(objectCreationTime)
+
+	return durationSinceObjectCreation < threshold
 }

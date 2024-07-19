@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/konflux-ci/integration-service/helpers"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/redhat-appstudio/integration-service/helpers"
 	"github.com/tonglil/buflogr"
 	"k8s.io/apimachinery/pkg/api/errors"
 
@@ -82,5 +82,29 @@ var _ = Describe("Helpers for error handlers", Ordered, func() {
 			err := fmt.Errorf("failed")
 			Expect(helpers.IsEnvironmentNotInNamespaceError(err)).To(BeFalse())
 		})
+
+		It("Can define MissingInfoInPipelineRunError", func() {
+			err := helpers.MissingInfoInPipelineRunError("pipelineRunName", "revision")
+			Expect(helpers.IsMissingInfoInPipelineRunError(err)).To(BeTrue())
+			Expect(err.Error()).To(Equal("Missing info revision from pipelinerun pipelineRunName"))
+		})
+
+		It("Can define InvalidImageDigestError", func() {
+			err := helpers.NewInvalidImageDigestError("componentName", "badDigest")
+			Expect(helpers.IsInvalidImageDigestError(err)).To(BeTrue())
+			Expect(err.Error()).To(Equal("badDigest is invalid container image digest from component componentName"))
+		})
+
+		It("Can define MissingValidComponentError", func() {
+			err := helpers.NewMissingValidComponentError("componentName")
+			Expect(helpers.IsMissingValidComponentError(err)).To(BeTrue())
+			Expect(err.Error()).To(Equal("The only one component componentName is invalid, valid .Spec.ContainerImage is missing"))
+		})
+
+		It("Can handle non integration error", func() {
+			err := fmt.Errorf("failed")
+			Expect(helpers.IsMissingInfoInPipelineRunError(err)).To(BeFalse())
+		})
+
 	})
 })

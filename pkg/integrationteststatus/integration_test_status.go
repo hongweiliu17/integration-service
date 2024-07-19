@@ -35,14 +35,16 @@ const (
 	IntegrationTestStatusInProgress // InProgress
 	// Integration PLR deleted for this ITS and snapshot
 	IntegrationTestStatusDeleted // Deleted
-	// The environment provision experienced error for this ITS and snapshot
-	IntegrationTestStatusEnvironmentProvisionError // EnvironmentProvisionError
-	// The SEB deployment experienced error for this ITS and snapshot
-	IntegrationTestStatusDeploymentError // DeploymentError
+	// (Deprecated) The environment provision experienced error for this ITS and snapshot
+	IntegrationTestStatusEnvironmentProvisionError_Deprecated // EnvironmentProvisionError
+	// (Deprecated) The SEB deployment experienced error for this ITS and snapshot
+	IntegrationTestStatusDeploymentError_Deprecated // DeploymentError
 	// Integration PLR failed for this ITS and snapshot
 	IntegrationTestStatusTestFail // TestFail
 	// Integration PLR passed for this ITS and snapshot
 	IntegrationTestStatusTestPassed // TestPassed
+	// Integration PLR is invalid
+	IntegrationTestStatusTestInvalid // TestInvalid
 )
 
 const integrationTestStatusesSchema = `{
@@ -105,6 +107,19 @@ type SnapshotIntegrationTestStatuses struct {
 	dirty bool
 }
 
+func (sits *IntegrationTestStatus) IsFinal() bool {
+	switch *sits {
+	case IntegrationTestStatusDeleted,
+		IntegrationTestStatusDeploymentError_Deprecated,
+		IntegrationTestStatusEnvironmentProvisionError_Deprecated,
+		IntegrationTestStatusTestFail,
+		IntegrationTestStatusTestPassed,
+		IntegrationTestStatusTestInvalid:
+		return true
+	}
+	return false
+}
+
 // IsDirty returns boolean if there are any changes
 func (sits *SnapshotIntegrationTestStatuses) IsDirty() bool {
 	return sits.dirty
@@ -157,11 +172,12 @@ func (sits *SnapshotIntegrationTestStatuses) UpdateTestStatusIfChanged(scenarioN
 			// null all timestamps as test is not inProgress neither in final state
 			detail.StartTime = nil
 			detail.CompletionTime = nil
-		case IntegrationTestStatusDeploymentError,
-			IntegrationTestStatusEnvironmentProvisionError,
+		case IntegrationTestStatusDeploymentError_Deprecated,
+			IntegrationTestStatusEnvironmentProvisionError_Deprecated,
 			IntegrationTestStatusDeleted,
 			IntegrationTestStatusTestFail,
-			IntegrationTestStatusTestPassed:
+			IntegrationTestStatusTestPassed,
+			IntegrationTestStatusTestInvalid:
 			detail.CompletionTime = &timestamp
 		}
 	}

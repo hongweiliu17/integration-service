@@ -22,16 +22,16 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
+	"github.com/konflux-ci/integration-service/api/v1beta2"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 
+	"github.com/konflux-ci/integration-service/gitops"
+	releasev1alpha1 "github.com/konflux-ci/release-service/api/v1alpha1"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/gitops"
-	releasev1alpha1 "github.com/redhat-appstudio/release-service/api/v1alpha1"
 )
 
 var _ = Describe("Loader", Ordered, func() {
@@ -40,15 +40,11 @@ var _ = Describe("Loader", Ordered, func() {
 		hasSnapshot             *applicationapiv1alpha1.Snapshot
 		hasApp                  *applicationapiv1alpha1.Application
 		hasComp                 *applicationapiv1alpha1.Component
-		hasEnv                  *applicationapiv1alpha1.Environment
-		deploymentTargetClass   *applicationapiv1alpha1.DeploymentTargetClass
-		deploymentTarget        *applicationapiv1alpha1.DeploymentTarget
-		deploymentTargetClaim   *applicationapiv1alpha1.DeploymentTargetClaim
-		integrationTestScenario *v1beta1.IntegrationTestScenario
+		integrationTestScenario *v1beta2.IntegrationTestScenario
 		successfulTaskRun       *tektonv1.TaskRun
+		taskRunSample           *tektonv1.TaskRun
 		buildPipelineRun        *tektonv1.PipelineRun
 		integrationPipelineRun  *tektonv1.PipelineRun
-		hasBinding              *applicationapiv1alpha1.SnapshotEnvironmentBinding
 	)
 
 	const (
@@ -103,8 +99,9 @@ var _ = Describe("Loader", Ordered, func() {
 				Name:      snapshotName,
 				Namespace: "default",
 				Labels: map[string]string{
-					gitops.SnapshotTypeLabel:      "component",
-					gitops.SnapshotComponentLabel: "component-sample",
+					gitops.SnapshotTypeLabel:         "component",
+					gitops.SnapshotComponentLabel:    "component-sample",
+					gitops.BuildPipelineRunNameLabel: "pipelinerun-sample",
 				},
 				Annotations: map[string]string{
 					gitops.PipelineAsCodeInstallationIDAnnotation: "123",
@@ -166,7 +163,7 @@ var _ = Describe("Loader", Ordered, func() {
 						Name: "HACBS_TEST_OUTPUT",
 						Value: *tektonv1.NewStructuredValues(`{
 											"result": "SUCCESS",
-											"timestamp": "1665405318",
+											"timestamp": "2024-05-22T06:42:21+00:00",
 											"failures": 0,
 											"successes": 10,
 											"warnings": 0
@@ -177,7 +174,7 @@ var _ = Describe("Loader", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, successfulTaskRun)).Should(Succeed())
 
-		integrationTestScenario = &v1beta1.IntegrationTestScenario{
+		integrationTestScenario = &v1beta2.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "example-pass",
 				Namespace: "default",
@@ -186,11 +183,11 @@ var _ = Describe("Loader", Ordered, func() {
 					"test.appstudio.openshift.io/optional": "false",
 				},
 			},
-			Spec: v1beta1.IntegrationTestScenarioSpec{
+			Spec: v1beta2.IntegrationTestScenarioSpec{
 				Application: hasApp.Name,
-				ResolverRef: v1beta1.ResolverRef{
+				ResolverRef: v1beta2.ResolverRef{
 					Resolver: "git",
-					Params: []v1beta1.ResolverParameter{
+					Params: []v1beta2.ResolverParameter{
 						{
 							Name:  "url",
 							Value: "https://github.com/redhat-appstudio/integration-examples.git",
@@ -205,83 +202,9 @@ var _ = Describe("Loader", Ordered, func() {
 						},
 					},
 				},
-				Environment: v1beta1.TestEnvironment{
-					Name: "envname",
-					Type: "POC",
-					Configuration: &applicationapiv1alpha1.EnvironmentConfiguration{
-						Env: []applicationapiv1alpha1.EnvVarPair{},
-					},
-				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, integrationTestScenario)).Should(Succeed())
-
-		deploymentTargetClass = &applicationapiv1alpha1.DeploymentTargetClass{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "dtcls" + "-",
-			},
-			Spec: applicationapiv1alpha1.DeploymentTargetClassSpec{
-				Provisioner: "appstudio.redhat.com/devsandbox",
-			},
-		}
-		Expect(k8sClient.Create(ctx, deploymentTargetClass)).Should(Succeed())
-
-		deploymentTarget = &applicationapiv1alpha1.DeploymentTarget{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "dt" + "-",
-				Namespace:    "default",
-			},
-			Spec: applicationapiv1alpha1.DeploymentTargetSpec{
-				DeploymentTargetClassName: applicationapiv1alpha1.DeploymentTargetClassName(deploymentTargetClass.Name),
-				KubernetesClusterCredentials: applicationapiv1alpha1.DeploymentTargetKubernetesClusterCredentials{
-					DefaultNamespace:           "default",
-					APIURL:                     "https://url",
-					ClusterCredentialsSecret:   "secret-sample",
-					AllowInsecureSkipTLSVerify: false,
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, deploymentTarget)).Should(Succeed())
-
-		deploymentTargetClaim = &applicationapiv1alpha1.DeploymentTargetClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "dtc" + "-",
-				Namespace:    "default",
-			},
-			Spec: applicationapiv1alpha1.DeploymentTargetClaimSpec{
-				DeploymentTargetClassName: applicationapiv1alpha1.DeploymentTargetClassName(deploymentTargetClass.Name),
-				TargetName:                deploymentTarget.Name,
-			},
-		}
-		Expect(k8sClient.Create(ctx, deploymentTargetClaim)).Should(Succeed())
-
-		hasEnv = &applicationapiv1alpha1.Environment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-env",
-				Namespace: "default",
-			},
-			Spec: applicationapiv1alpha1.EnvironmentSpec{
-				Type:               "POC",
-				DisplayName:        "my-environment",
-				DeploymentStrategy: applicationapiv1alpha1.DeploymentStrategy_Manual,
-				ParentEnvironment:  "",
-				Tags:               []string{"ephemeral"},
-				Configuration: applicationapiv1alpha1.EnvironmentConfiguration{
-					Env: []applicationapiv1alpha1.EnvVarPair{
-						{
-							Name:  "var_name",
-							Value: "test",
-						},
-					},
-					Target: applicationapiv1alpha1.EnvironmentTarget{
-						DeploymentTargetClaim: applicationapiv1alpha1.DeploymentTargetClaimConfig{
-							ClaimName: deploymentTargetClaim.Name,
-						},
-					},
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, hasEnv)).Should(Succeed())
 
 		buildPipelineRun = &tektonv1.PipelineRun{
 			ObjectMeta: metav1.ObjectMeta{
@@ -295,7 +218,6 @@ var _ = Describe("Loader", Ordered, func() {
 					"appstudio.openshift.io/component":      "component-sample",
 					"appstudio.openshift.io/application":    applicationName,
 					"appstudio.openshift.io/snapshot":       snapshotName,
-					"appstudio.openshift.io/environment":    hasEnv.Name,
 					"test.appstudio.openshift.io/scenario":  integrationTestScenario.Name,
 				},
 				Annotations: map[string]string{
@@ -357,7 +279,6 @@ var _ = Describe("Loader", Ordered, func() {
 					"pac.test.appstudio.openshift.io/repository":      "build-service-pac",
 					"appstudio.openshift.io/snapshot":                 hasSnapshot.Name,
 					"test.appstudio.openshift.io/scenario":            integrationTestScenario.Name,
-					"appstudio.openshift.io/environment":              hasEnv.Name,
 					"appstudio.openshift.io/application":              hasApp.Name,
 					"appstudio.openshift.io/component":                hasComp.Name,
 				},
@@ -387,22 +308,16 @@ var _ = Describe("Loader", Ordered, func() {
 
 		Expect(k8sClient.Create(ctx, integrationPipelineRun)).Should(Succeed())
 
-		hasBinding = &applicationapiv1alpha1.SnapshotEnvironmentBinding{
+		taskRunSample = &tektonv1.TaskRun{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "snapshot-binding-sample",
+				Name:      "taskrun-sample",
 				Namespace: "default",
 				Labels: map[string]string{
-					gitops.SnapshotTestScenarioLabel: integrationTestScenario.Name,
+					"tekton.dev/pipelineRun": buildPipelineRun.Name,
 				},
 			},
-			Spec: applicationapiv1alpha1.SnapshotEnvironmentBindingSpec{
-				Application: hasApp.Name,
-				Snapshot:    hasSnapshot.Name,
-				Environment: hasEnv.Name,
-				Components:  []applicationapiv1alpha1.BindingComponent{},
-			},
 		}
-		Expect(k8sClient.Create(ctx, hasBinding)).Should(Succeed())
+		Expect(k8sClient.Create(ctx, taskRunSample)).Should(Succeed())
 	})
 
 	AfterAll(func() {
@@ -410,14 +325,10 @@ var _ = Describe("Loader", Ordered, func() {
 		_ = k8sClient.Delete(ctx, buildPipelineRun)
 		_ = k8sClient.Delete(ctx, integrationPipelineRun)
 		_ = k8sClient.Delete(ctx, successfulTaskRun)
-		_ = k8sClient.Delete(ctx, hasEnv)
 		_ = k8sClient.Delete(ctx, integrationTestScenario)
 		_ = k8sClient.Delete(ctx, hasApp)
 		_ = k8sClient.Delete(ctx, hasComp)
-		_ = k8sClient.Delete(ctx, deploymentTargetClass)
-		_ = k8sClient.Delete(ctx, deploymentTargetClaim)
-		_ = k8sClient.Delete(ctx, deploymentTarget)
-		_ = k8sClient.Delete(ctx, hasBinding)
+		_ = k8sClient.Delete(ctx, taskRunSample)
 	})
 
 	createReleasePlan := func(releasePlan *releasev1alpha1.ReleasePlan) {
@@ -449,23 +360,18 @@ var _ = Describe("Loader", Ordered, func() {
 		}, time.Second*10).Should(BeTrue())
 	}
 
-	It("ensures environments can be found", func() {
-		environments, err := loader.GetAllEnvironments(k8sClient, ctx, hasApp)
-		Expect(err).To(BeNil())
-		Expect(environments).NotTo(BeNil())
-	})
-
 	It("ensures all Releases exists when HACBSTests succeeded", func() {
 		Expect(k8sClient).NotTo(BeNil())
 		Expect(ctx).NotTo(BeNil())
 		Expect(hasSnapshot).NotTo(BeNil())
-		gitops.MarkSnapshotAsPassed(k8sClient, ctx, hasSnapshot, "test passed")
+		err := gitops.MarkSnapshotAsPassed(ctx, k8sClient, hasSnapshot, "test passed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeTrue())
 
 		// Normally we would Ensure that releases exist here, but that requires
 		// importing the snapshot package which causes an import cycle
 
-		releases, err := loader.GetReleasesWithSnapshot(k8sClient, ctx, hasSnapshot)
+		releases, err := loader.GetReleasesWithSnapshot(ctx, k8sClient, hasSnapshot)
 		Expect(err).To(BeNil())
 		Expect(releases).NotTo(BeNil())
 		for _, release := range *releases {
@@ -474,133 +380,115 @@ var _ = Describe("Loader", Ordered, func() {
 	})
 
 	It("ensures the Application Components can be found ", func() {
-		applicationComponents, err := loader.GetAllApplicationComponents(k8sClient, ctx, hasApp)
+		applicationComponents, err := loader.GetAllApplicationComponents(ctx, k8sClient, hasApp)
 		Expect(err).To(BeNil())
 		Expect(applicationComponents).NotTo(BeNil())
 	})
 
 	It("ensures we can get an Application from a Snapshot ", func() {
-		app, err := loader.GetApplicationFromSnapshot(k8sClient, ctx, hasSnapshot)
+		app, err := loader.GetApplicationFromSnapshot(ctx, k8sClient, hasSnapshot)
 		Expect(err).To(BeNil())
 		Expect(app).NotTo(BeNil())
 		Expect(app.ObjectMeta).To(Equal(hasApp.ObjectMeta))
 	})
 
 	It("ensures we can get a Component from a Snapshot ", func() {
-		comp, err := loader.GetComponentFromSnapshot(k8sClient, ctx, hasSnapshot)
+		comp, err := loader.GetComponentFromSnapshot(ctx, k8sClient, hasSnapshot)
 		Expect(err).To(BeNil())
 		Expect(comp).NotTo(BeNil())
 		Expect(comp.ObjectMeta).To(Equal(hasComp.ObjectMeta))
 	})
 
+	It("ensures a non-nil error is returned when we cannot get a Component from a Snapshot if the label is missing", func() {
+		// Temporarily remove the component label from Snapshot
+		delete(hasSnapshot.Labels, gitops.SnapshotComponentLabel)
+
+		comp, err := loader.GetComponentFromSnapshot(ctx, k8sClient, hasSnapshot)
+		Expect(err).To(HaveOccurred())
+		Expect(comp).To(BeNil())
+
+		// Restore the component label
+		hasSnapshot.Labels[gitops.SnapshotComponentLabel] = hasComp.Name
+	})
+
 	It("ensures we can get a Component from a Pipeline Run ", func() {
-		comp, err := loader.GetComponentFromPipelineRun(k8sClient, ctx, buildPipelineRun)
+		comp, err := loader.GetComponentFromPipelineRun(ctx, k8sClient, buildPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(comp).NotTo(BeNil())
 		Expect(comp.ObjectMeta).To(Equal(hasComp.ObjectMeta))
 	})
 
 	It("ensures we can get the application from the Pipeline Run", func() {
-		app, err := loader.GetApplicationFromPipelineRun(k8sClient, ctx, buildPipelineRun)
+		app, err := loader.GetApplicationFromPipelineRun(ctx, k8sClient, buildPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(app).NotTo(BeNil())
 		Expect(app.ObjectMeta).To(Equal(hasApp.ObjectMeta))
 	})
 
-	It("ensures we can get the environment from the Pipeline Run", func() {
-		env, err := loader.GetApplicationFromPipelineRun(k8sClient, ctx, buildPipelineRun)
-		Expect(err).To(BeNil())
-		Expect(env).NotTo(BeNil())
-	})
-
 	It("ensures we can get the Application from a Component", func() {
-		app, err := loader.GetApplicationFromComponent(k8sClient, ctx, hasComp)
+		app, err := loader.GetApplicationFromComponent(ctx, k8sClient, hasComp)
 		Expect(err).To(BeNil())
 		Expect(app).NotTo(BeNil())
 		Expect(app.ObjectMeta).To(Equal(hasApp.ObjectMeta))
 	})
 
 	It("ensures we can get the Snapshot from a Pipeline Run", func() {
-		snapshot, err := loader.GetSnapshotFromPipelineRun(k8sClient, ctx, buildPipelineRun)
+		snapshot, err := loader.GetSnapshotFromPipelineRun(ctx, k8sClient, buildPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(snapshot).NotTo(BeNil())
 		Expect(snapshot.ObjectMeta).To(Equal(hasSnapshot.ObjectMeta))
 	})
 
-	It("ensures we can get the Environment from a Pipeline Run", func() {
-		env, err := loader.GetEnvironmentFromIntegrationPipelineRun(k8sClient, ctx, buildPipelineRun)
-		Expect(err).To(BeNil())
-		Expect(env).NotTo(BeNil())
-		Expect(env.ObjectMeta).To(Equal(hasEnv.ObjectMeta))
-	})
-
-	It("can fetch all build pipelineRuns", func() {
-		pipelineRuns, err := loader.GetAllBuildPipelineRunsForComponent(k8sClient, ctx, hasComp)
-		Expect(err).To(BeNil())
-		Expect(pipelineRuns).NotTo(BeNil())
-		Expect(len(*pipelineRuns)).To(Equal(1))
-		Expect((*pipelineRuns)[0].Name == buildPipelineRun.Name)
+	It("ensures we can get the Snapshot from a Pipeline Run", func() {
+		snapshots, err := loader.GetAllSnapshotsForBuildPipelineRun(ctx, k8sClient, buildPipelineRun)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(snapshots).NotTo(BeNil())
+		Expect(*snapshots).To(HaveLen(1))
+		Expect((*snapshots)[0].Name).To(Equal(hasSnapshot.Name))
 	})
 
 	It("can fetch all pipelineRuns for snapshot and scenario", func() {
-		pipelineRuns, err := loader.GetAllPipelineRunsForSnapshotAndScenario(k8sClient, ctx, hasSnapshot, integrationTestScenario)
+		pipelineRuns, err := loader.GetAllPipelineRunsForSnapshotAndScenario(ctx, k8sClient, hasSnapshot, integrationTestScenario)
 		Expect(err).To(BeNil())
 		Expect(pipelineRuns).NotTo(BeNil())
-		Expect(len(*pipelineRuns)).To(Equal(1))
-		Expect((*pipelineRuns)[0].Name == buildPipelineRun.Name)
+		Expect(*pipelineRuns).To(HaveLen(1))
+		Expect((*pipelineRuns)[0].Name).To(Equal(integrationPipelineRun.Name))
 	})
 
 	It("can fetch all integrationTestScenario for application", func() {
-		integrationTestScenarios, err := loader.GetAllIntegrationTestScenariosForApplication(k8sClient, ctx, hasApp)
+		integrationTestScenarios, err := loader.GetAllIntegrationTestScenariosForApplication(ctx, k8sClient, hasApp)
 		Expect(err).To(BeNil())
 		Expect(integrationTestScenarios).NotTo(BeNil())
-		Expect(len(*integrationTestScenarios)).To(Equal(1))
-		Expect((*integrationTestScenarios)[0].Name == integrationTestScenario.Name)
+		Expect(*integrationTestScenarios).To(HaveLen(1))
+		Expect((*integrationTestScenarios)[0].Name).To(Equal(integrationTestScenario.Name))
 	})
 
 	It("can fetch required integrationTestScenario for application", func() {
-		integrationTestScenarios, err := loader.GetRequiredIntegrationTestScenariosForApplication(k8sClient, ctx, hasApp)
+		integrationTestScenarios, err := loader.GetRequiredIntegrationTestScenariosForApplication(ctx, k8sClient, hasApp)
 		Expect(err).To(BeNil())
 		Expect(integrationTestScenarios).NotTo(BeNil())
-		Expect(len(*integrationTestScenarios)).To(Equal(1))
-		Expect((*integrationTestScenarios)[0].Name == integrationTestScenario.Name)
-	})
-
-	It("can find available DeploymentTargetClass for application", func() {
-		dtcls, err := loader.FindAvailableDeploymentTargetClass(k8sClient, ctx)
-		Expect(err).To(BeNil())
-		Expect(dtcls.Name == deploymentTargetClass.Name)
-	})
-
-	It("can fetch DeploymentTargetClaim for environment", func() {
-		dtcls, err := loader.GetDeploymentTargetClaimForEnvironment(k8sClient, ctx, hasEnv)
-		Expect(err).To(BeNil())
-		Expect(dtcls.Name == deploymentTargetClass.Name)
-	})
-
-	It("can fetch DeploymentTarget for DeploymentTargetClaim", func() {
-		dt, err := loader.GetDeploymentTargetForDeploymentTargetClaim(k8sClient, ctx, deploymentTargetClaim)
-		Expect(err).To(BeNil())
-		Expect(dt.Name == deploymentTarget.Name)
-	})
-
-	It("can snapshotEnvironmentBinding for application and environment", func() {
-		binding, err := loader.FindExistingSnapshotEnvironmentBinding(k8sClient, ctx, hasApp, hasEnv)
-		Expect(err).To(BeNil())
-		Expect(binding.Name == hasBinding.Name)
+		Expect(*integrationTestScenarios).To(HaveLen(1))
+		Expect((*integrationTestScenarios)[0].Name).To(Equal(integrationTestScenario.Name))
 	})
 
 	It("ensures that all Snapshots for a given application can be found", func() {
-		snapshots, err := loader.GetAllSnapshots(k8sClient, ctx, hasApp)
+		snapshots, err := loader.GetAllSnapshots(ctx, k8sClient, hasApp)
 		Expect(err).To(BeNil())
-		Expect(len(*snapshots)).To(Equal(1))
+		Expect(*snapshots).To(HaveLen(1))
 	})
 
 	It("ensures the ReleasePlan can be gotten for Application", func() {
-		gottenReleasePlanItems, err := loader.GetAutoReleasePlansForApplication(k8sClient, ctx, hasApp)
+		gottenReleasePlanItems, err := loader.GetAutoReleasePlansForApplication(ctx, k8sClient, hasApp)
 		Expect(err).To(BeNil())
 		Expect(gottenReleasePlanItems).NotTo(BeNil())
 
+	})
+
+	It("can get all TaskRuns present in the cluster that are associated with the given pipelineRun", func() {
+		taskRuns, err := loader.GetAllTaskRunsWithMatchingPipelineRunLabel(ctx, k8sClient, buildPipelineRun)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(*taskRuns).To(HaveLen(1))
+		Expect((*taskRuns)[0].Name).To(Equal(taskRunSample.Name))
 	})
 
 	When("release plan with auto-release label is created", func() {
@@ -637,10 +525,10 @@ var _ = Describe("Loader", Ordered, func() {
 
 		It("ensures the auto-release plans for application are returned correctly when the auto-release label is set to true", func() {
 			// Get auto-release plans for application
-			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(k8sClient, ctx, hasApp)
+			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(ctx, k8sClient, hasApp)
 			Expect(err).To(BeNil())
 			Expect(autoReleasePlans).ToNot(BeNil())
-			Expect(len(*autoReleasePlans)).To(Equal(1))
+			Expect(*autoReleasePlans).To(HaveLen(1))
 			Expect((*autoReleasePlans)[0].Name).To(Equal(releasePlanWithLabel.Name))
 
 		})
@@ -677,10 +565,10 @@ var _ = Describe("Loader", Ordered, func() {
 
 		It("ensures the auto-release plans for application are returned correctly when the auto-release label is missing", func() {
 			// Get auto-release plans for application
-			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(k8sClient, ctx, hasApp)
+			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(ctx, k8sClient, hasApp)
 			Expect(err).To(BeNil())
 			Expect(autoReleasePlans).ToNot(BeNil())
-			Expect(len(*autoReleasePlans)).To(Equal(1))
+			Expect(*autoReleasePlans).To(HaveLen(1))
 			Expect((*autoReleasePlans)[0].Name).To(Equal(releasePlanNoLabel.Name))
 
 		})
@@ -720,19 +608,34 @@ var _ = Describe("Loader", Ordered, func() {
 
 		It("ensures the auto-release plans for application are returned correctly when the auto-release label is set to false", func() {
 			// Get auto-release plans for application
-			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(k8sClient, ctx, hasApp)
+			autoReleasePlans, err := loader.GetAutoReleasePlansForApplication(ctx, k8sClient, hasApp)
 			Expect(err).To(BeNil())
 			Expect(autoReleasePlans).ToNot(BeNil())
-			Expect(len(*autoReleasePlans)).To(Equal(0))
+			Expect(*autoReleasePlans).To(BeEmpty())
 		})
 
 		It("Can fetch integration test scenario", func() {
-			fetchedScenario, err := loader.GetScenario(k8sClient, ctx, integrationTestScenario.Name, integrationTestScenario.Namespace)
+			fetchedScenario, err := loader.GetScenario(ctx, k8sClient, integrationTestScenario.Name, integrationTestScenario.Namespace)
 			Expect(err).To(Succeed())
 			Expect(fetchedScenario.Name).To(Equal(integrationTestScenario.Name))
 			Expect(fetchedScenario.Namespace).To(Equal(integrationTestScenario.Namespace))
 			Expect(fetchedScenario.Spec).To(Equal(integrationTestScenario.Spec))
 		})
-	})
 
+		It("Can fetch pipelineRun", func() {
+			fetchedBuildPipelineRun, err := loader.GetPipelineRun(ctx, k8sClient, buildPipelineRun.Name, buildPipelineRun.Namespace)
+			Expect(err).To(Succeed())
+			Expect(fetchedBuildPipelineRun.Name).To(Equal(buildPipelineRun.Name))
+			Expect(fetchedBuildPipelineRun.Namespace).To(Equal(buildPipelineRun.Namespace))
+			Expect(fetchedBuildPipelineRun.Spec).To(Equal(buildPipelineRun.Spec))
+		})
+
+		It("Can fetch component", func() {
+			fetchedBuildComponent, err := loader.GetComponent(ctx, k8sClient, hasComp.Spec.ComponentName, hasComp.Namespace)
+			Expect(err).To(Succeed())
+			Expect(fetchedBuildComponent.Name).To(Equal(hasComp.Spec.ComponentName))
+			Expect(fetchedBuildComponent.Namespace).To(Equal(hasComp.Namespace))
+			Expect(fetchedBuildComponent.Spec).To(Equal(hasComp.Spec))
+		})
+	})
 })

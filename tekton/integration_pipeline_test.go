@@ -18,16 +18,17 @@ package tekton_test
 
 import (
 	"bytes"
-
+	"github.com/konflux-ci/integration-service/api/v1beta2"
+	"github.com/konflux-ci/integration-service/helpers"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
-	"github.com/redhat-appstudio/integration-service/helpers"
 	"github.com/tonglil/buflogr"
+	"os"
+	"time"
 
+	"github.com/konflux-ci/integration-service/gitops"
+	tekton "github.com/konflux-ci/integration-service/tekton"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/gitops"
-	tekton "github.com/redhat-appstudio/integration-service/tekton"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -52,12 +53,9 @@ var _ = Describe("Integration pipeline", func() {
 		newIntegrationPipelineRun       *tekton.IntegrationPipelineRun
 		newIntegrationBundlePipelineRun *tekton.IntegrationPipelineRun
 		enterpriseContractPipelineRun   *tekton.IntegrationPipelineRun
-		hasEnv                          *applicationapiv1alpha1.Environment
-		deploymentTargetClaim           *applicationapiv1alpha1.DeploymentTargetClaim
-		deploymentTarget                *applicationapiv1alpha1.DeploymentTarget
-		integrationTestScenarioGit      *v1beta1.IntegrationTestScenario
-		integrationTestScenarioBundle   *v1beta1.IntegrationTestScenario
-		enterpriseContractTestScenario  *v1beta1.IntegrationTestScenario
+		integrationTestScenarioGit      *v1beta2.IntegrationTestScenario
+		integrationTestScenarioBundle   *v1beta2.IntegrationTestScenario
+		enterpriseContractTestScenario  *v1beta2.IntegrationTestScenario
 		extraParams                     *ExtraParams
 	)
 
@@ -71,7 +69,7 @@ var _ = Describe("Integration pipeline", func() {
 			},
 		}
 
-		integrationTestScenarioGit = &v1beta1.IntegrationTestScenario{
+		integrationTestScenarioGit = &v1beta2.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "example-pass",
 				Namespace: "default",
@@ -80,11 +78,11 @@ var _ = Describe("Integration pipeline", func() {
 					"test.appstudio.openshift.io/optional": "false",
 				},
 			},
-			Spec: v1beta1.IntegrationTestScenarioSpec{
+			Spec: v1beta2.IntegrationTestScenarioSpec{
 				Application: "application-sample",
-				ResolverRef: v1beta1.ResolverRef{
+				ResolverRef: v1beta2.ResolverRef{
 					Resolver: "git",
-					Params: []v1beta1.ResolverParameter{
+					Params: []v1beta2.ResolverParameter{
 						{
 							Name:  "url",
 							Value: "https://github.com/redhat-appstudio/integration-examples.git",
@@ -99,14 +97,6 @@ var _ = Describe("Integration pipeline", func() {
 						},
 					},
 				},
-				Environment: v1beta1.TestEnvironment{
-					Name: "envname",
-					Type: "POC",
-					//Params: []string{},
-					Configuration: &applicationapiv1alpha1.EnvironmentConfiguration{
-						Env: []applicationapiv1alpha1.EnvVarPair{},
-					},
-				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, integrationTestScenarioGit)).Should(Succeed())
@@ -115,7 +105,7 @@ var _ = Describe("Integration pipeline", func() {
 		newIntegrationPipelineRun = tekton.NewIntegrationPipelineRun(prefix, namespace, *integrationTestScenarioGit)
 		Expect(k8sClient.Create(ctx, newIntegrationPipelineRun.AsPipelineRun())).Should(Succeed())
 
-		integrationTestScenarioBundle = &v1beta1.IntegrationTestScenario{
+		integrationTestScenarioBundle = &v1beta2.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-bundle",
 				Namespace: "default",
@@ -124,11 +114,11 @@ var _ = Describe("Integration pipeline", func() {
 					"test.appstudio.openshift.io/optional": "false",
 				},
 			},
-			Spec: v1beta1.IntegrationTestScenarioSpec{
+			Spec: v1beta2.IntegrationTestScenarioSpec{
 				Application: "application-sample",
-				ResolverRef: v1beta1.ResolverRef{
+				ResolverRef: v1beta2.ResolverRef{
 					Resolver: "bundles",
-					Params: []v1beta1.ResolverParameter{
+					Params: []v1beta2.ResolverParameter{
 						{
 							Name:  "bundle",
 							Value: "quay.io/redhat-appstudio/example-tekton-bundle:integration-pipeline-pass",
@@ -143,19 +133,11 @@ var _ = Describe("Integration pipeline", func() {
 						},
 					},
 				},
-				Environment: v1beta1.TestEnvironment{
-					Name: "envname",
-					Type: "POC",
-					//Params: []string{},
-					Configuration: &applicationapiv1alpha1.EnvironmentConfiguration{
-						Env: []applicationapiv1alpha1.EnvVarPair{},
-					},
-				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, integrationTestScenarioBundle)).Should(Succeed())
 
-		enterpriseContractTestScenario = &v1beta1.IntegrationTestScenario{
+		enterpriseContractTestScenario = &v1beta2.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "enterprise-contract",
 				Namespace: "default",
@@ -168,14 +150,14 @@ var _ = Describe("Integration pipeline", func() {
 					"test.appstudio.openshift.io/kind": "enterprise-contract",
 				},
 			},
-			Spec: v1beta1.IntegrationTestScenarioSpec{
+			Spec: v1beta2.IntegrationTestScenarioSpec{
 				Application: "application-sample",
-				ResolverRef: v1beta1.ResolverRef{
+				ResolverRef: v1beta2.ResolverRef{
 					Resolver: "git",
-					Params: []v1beta1.ResolverParameter{
+					Params: []v1beta2.ResolverParameter{
 						{
 							Name:  "url",
-							Value: "https://github.com/redhat-appstudio/build-definitions.git",
+							Value: "https://github.com/konflux-ci/build-definitions.git",
 						},
 						{
 							Name:  "revision",
@@ -187,15 +169,7 @@ var _ = Describe("Integration pipeline", func() {
 						},
 					},
 				},
-				Environment: v1beta1.TestEnvironment{
-					Name: "envname",
-					Type: "POC",
-					//Params: []string{},
-					Configuration: &applicationapiv1alpha1.EnvironmentConfiguration{
-						Env: []applicationapiv1alpha1.EnvVarPair{},
-					},
-				},
-				Params: []v1beta1.PipelineParameter{
+				Params: []v1beta2.PipelineParameter{
 					{
 						Name:  "POLICY_CONFIGURATION",
 						Value: "default/default",
@@ -217,70 +191,14 @@ var _ = Describe("Integration pipeline", func() {
 		}
 		Expect(k8sClient.Create(ctx, hasApp)).Should(Succeed())
 
-		deploymentTargetClaim = &applicationapiv1alpha1.DeploymentTargetClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "dtc" + "-",
-				Namespace:    namespace,
-			},
-			Spec: applicationapiv1alpha1.DeploymentTargetClaimSpec{
-				DeploymentTargetClassName: applicationapiv1alpha1.DeploymentTargetClassName("dtcls-name"),
-			},
-		}
-		Expect(k8sClient.Create(ctx, deploymentTargetClaim)).Should(Succeed())
-
-		deploymentTarget = &applicationapiv1alpha1.DeploymentTarget{
-			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: "dt" + "-",
-				Namespace:    namespace,
-			},
-			Spec: applicationapiv1alpha1.DeploymentTargetSpec{
-				ClaimRef:                  deploymentTargetClaim.Name,
-				DeploymentTargetClassName: "dtcls-name",
-				KubernetesClusterCredentials: applicationapiv1alpha1.DeploymentTargetKubernetesClusterCredentials{
-					DefaultNamespace:           "default",
-					APIURL:                     "https://url",
-					ClusterCredentialsSecret:   "secret-sample",
-					AllowInsecureSkipTLSVerify: false,
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, deploymentTarget)).Should(Succeed())
-
-		hasEnv = &applicationapiv1alpha1.Environment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "envname",
-				Namespace: "default",
-			},
-			Spec: applicationapiv1alpha1.EnvironmentSpec{
-				Type:               "POC",
-				DisplayName:        "my-environment",
-				DeploymentStrategy: applicationapiv1alpha1.DeploymentStrategy_Manual,
-				ParentEnvironment:  "",
-				Tags:               []string{},
-				Configuration: applicationapiv1alpha1.EnvironmentConfiguration{
-					Env: []applicationapiv1alpha1.EnvVarPair{
-						{
-							Name:  "var_name",
-							Value: "test",
-						},
-					},
-					Target: applicationapiv1alpha1.EnvironmentTarget{
-						DeploymentTargetClaim: applicationapiv1alpha1.DeploymentTargetClaimConfig{
-							ClaimName: deploymentTargetClaim.Name,
-						},
-					},
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, hasEnv)).Should(Succeed())
-
 		hasSnapshot = &applicationapiv1alpha1.Snapshot{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "snapshot-sample",
 				Namespace: "default",
 				Labels: map[string]string{
-					gitops.SnapshotTypeLabel:      "component",
-					gitops.SnapshotComponentLabel: "component-sample",
+					gitops.SnapshotTypeLabel:                   "component",
+					gitops.SnapshotComponentLabel:              "component-sample",
+					gitops.CustomLabelPrefix + "/custom-label": "custom-label",
 				},
 			},
 			Spec: applicationapiv1alpha1.SnapshotSpec{
@@ -318,7 +236,7 @@ var _ = Describe("Integration pipeline", func() {
 		newIntegrationBundlePipelineRun = tekton.NewIntegrationPipelineRun(prefix, namespace, *integrationTestScenarioBundle).
 			WithIntegrationLabels(integrationTestScenarioBundle).
 			WithSnapshot(hasSnapshot).
-			WithApplicationAndComponent(hasApp, hasComp)
+			WithApplication(hasApp)
 		Expect(k8sClient.Create(ctx, newIntegrationBundlePipelineRun.AsPipelineRun())).Should(Succeed())
 
 		enterpriseContractPipelineRun = tekton.NewIntegrationPipelineRun(prefix, namespace, *enterpriseContractTestScenario).
@@ -326,8 +244,12 @@ var _ = Describe("Integration pipeline", func() {
 			WithIntegrationAnnotations(enterpriseContractTestScenario).
 			WithSnapshot(hasSnapshot).
 			WithExtraParams(enterpriseContractTestScenario.Spec.Params).
-			WithApplicationAndComponent(hasApp, hasComp)
+			WithApplication(hasApp)
 		Expect(k8sClient.Create(ctx, enterpriseContractPipelineRun.AsPipelineRun())).Should(Succeed())
+
+		os.Setenv("PIPELINE_TIMEOUT", "2h")
+		os.Setenv("TASKS_TIMEOUT", "2h")
+		os.Setenv("FINALLY_TIMEOUT", "2h")
 	})
 
 	AfterEach(func() {
@@ -340,10 +262,11 @@ var _ = Describe("Integration pipeline", func() {
 		_ = k8sClient.Delete(ctx, hasApp)
 		_ = k8sClient.Delete(ctx, hasSnapshot)
 		_ = k8sClient.Delete(ctx, hasComp)
-		_ = k8sClient.Delete(ctx, hasEnv)
-		_ = k8sClient.Delete(ctx, deploymentTargetClaim)
-		_ = k8sClient.Delete(ctx, deploymentTarget)
 		_ = k8sClient.Delete(ctx, newIntegrationPipelineRun.AsPipelineRun())
+
+		os.Setenv("PIPELINE_TIMEOUT", "")
+		os.Setenv("TASKS_TIMEOUT", "")
+		os.Setenv("FINALLY_TIMEOUT", "")
 	})
 
 	Context("When managing a new IntegrationPipelineRun", func() {
@@ -354,23 +277,58 @@ var _ = Describe("Integration pipeline", func() {
 			Expect(string(enterpriseContractPipelineRun.Spec.PipelineRef.ResolverRef.Resolver)).To(Equal("git"))
 		})
 
+		It("can add timeouts to the IntegrationPipelineRun according to the environment variables", func() {
+			var buf bytes.Buffer
+			expectedDuration, _ := time.ParseDuration("2h")
+			newIntegrationPipelineRun.WithDefaultIntegrationTimeouts(buflogr.NewWithBuffer(&buf))
+
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Pipeline.Duration).To(Equal(expectedDuration))
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Tasks.Duration).To(Equal(expectedDuration))
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Finally.Duration).To(Equal(expectedDuration))
+
+			// The pipelineRun timeouts should be empty if environment vars are not set
+			os.Setenv("PIPELINE_TIMEOUT", "")
+			os.Setenv("TASKS_TIMEOUT", "")
+			os.Setenv("FINALLY_TIMEOUT", "")
+			newIntegrationPipelineRun.WithDefaultIntegrationTimeouts(buflogr.NewWithBuffer(&buf))
+
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Pipeline).To(BeNil())
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Tasks).To(BeNil())
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Finally).To(BeNil())
+
+			// Set the timeouts to invalid strings, which should skip setting the timeouts
+			os.Setenv("PIPELINE_TIMEOUT", "thisIsNotAValidDuration!")
+			os.Setenv("TASKS_TIMEOUT", "thisIsNotAValidDuration!")
+			os.Setenv("FINALLY_TIMEOUT", "thisIsNotAValidDuration!")
+			newIntegrationPipelineRun.WithDefaultIntegrationTimeouts(buflogr.NewWithBuffer(&buf))
+
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Pipeline).To(BeNil())
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Tasks).To(BeNil())
+			Expect(newIntegrationPipelineRun.Spec.Timeouts.Finally).To(BeNil())
+
+			expectedLogEntryPrefix := "failed to parse default"
+			Expect(buf.String()).Should(ContainSubstring(expectedLogEntryPrefix + " PIPELINE_TIMEOUT"))
+			Expect(buf.String()).Should(ContainSubstring(expectedLogEntryPrefix + " TASKS_TIMEOUT"))
+			Expect(buf.String()).Should(ContainSubstring(expectedLogEntryPrefix + " FINALLY_TIMEOUT"))
+		})
+
 		It("can add and remove finalizer from IntegrationPipelineRun", func() {
 			var buf bytes.Buffer
-			logEntry := "Removed Finalizer from the Integration PipelineRun"
+			logEntry := "Removed Finalizer from the PipelineRun"
 
 			newIntegrationPipelineRun.WithFinalizer(helpers.IntegrationPipelineRunFinalizer)
 			Expect(newIntegrationPipelineRun.Finalizers).To(ContainElement(ContainSubstring(helpers.IntegrationPipelineRunFinalizer)))
 
 			// calling RemoveFinalizerFromPipelineRun() when the PipelineRun contains the finalizer
 			log := helpers.IntegrationLogger{Logger: buflogr.NewWithBuffer(&buf)}
-			Expect(helpers.RemoveFinalizerFromPipelineRun(k8sClient, log, ctx, &newIntegrationPipelineRun.PipelineRun, helpers.IntegrationPipelineRunFinalizer)).To(BeNil())
+			Expect(helpers.RemoveFinalizerFromPipelineRun(ctx, k8sClient, log, &newIntegrationPipelineRun.PipelineRun, helpers.IntegrationPipelineRunFinalizer)).To(Succeed())
 			Expect(newIntegrationPipelineRun.Finalizers).To(BeNil())
 			Expect(buf.String()).Should(ContainSubstring(logEntry))
 
 			// calling RemoveFinalizerFromPipelineRun() when the PipelineRun doesn't contain the finalizer
 			buf = bytes.Buffer{}
 			log = helpers.IntegrationLogger{Logger: buflogr.NewWithBuffer(&buf)}
-			Expect(helpers.RemoveFinalizerFromPipelineRun(k8sClient, log, ctx, &newIntegrationPipelineRun.PipelineRun, helpers.IntegrationPipelineRunFinalizer)).To(BeNil())
+			Expect(helpers.RemoveFinalizerFromPipelineRun(ctx, k8sClient, log, &newIntegrationPipelineRun.PipelineRun, helpers.IntegrationPipelineRunFinalizer)).To(Succeed())
 			Expect(newIntegrationPipelineRun.Finalizers).To(BeNil())
 			Expect(buf.String()).ShouldNot(ContainSubstring(logEntry))
 		})
@@ -394,39 +352,26 @@ var _ = Describe("Integration pipeline", func() {
 				To(Equal(integrationTestScenarioGit.Namespace))
 		})
 
-		It("can append labels that comes from Snapshot to IntegrationPipelineRun and make sure that label value matches the snapshot name", func() {
+		It("can append labels that comes from Snapshot to IntegrationPipelineRun and make sure that label value matches the snapshot and component names", func() {
 			newIntegrationPipelineRun.WithSnapshot(hasSnapshot)
 			Expect(newIntegrationPipelineRun.Labels["appstudio.openshift.io/snapshot"]).
 				To(Equal(hasSnapshot.Name))
-		})
-
-		It("can append labels coming from Application and Component to IntegrationPipelineRun and making sure that label values matches application and component names", func() {
-			newIntegrationPipelineRun.WithApplicationAndComponent(hasApp, hasComp)
 			Expect(newIntegrationPipelineRun.Labels["appstudio.openshift.io/component"]).
 				To(Equal(hasComp.Name))
+			Expect(newIntegrationPipelineRun.Labels[gitops.CustomLabelPrefix+"/custom_label"]).
+				To(Equal(hasSnapshot.Labels[gitops.CustomLabelPrefix+"/custom_label"]))
+			Expect(newIntegrationPipelineRun.Labels[gitops.SnapshotTypeLabel]).
+				To(Equal(hasSnapshot.Labels[gitops.SnapshotTypeLabel]))
+		})
+
+		It("can append labels coming from Application to IntegrationPipelineRun and making sure that label values matches application", func() {
+			newIntegrationPipelineRun.WithApplication(hasApp)
 			Expect(newIntegrationPipelineRun.Labels["appstudio.openshift.io/application"]).
 				To(Equal(hasApp.Name))
 		})
 
-		It("can append labels, workspaces and parameters that comes from Environment to IntegrationPipelineRun", func() {
-			newIntegrationPipelineRun.WithEnvironmentAndDeploymentTarget(deploymentTarget, hasEnv.Name)
-			Expect(newIntegrationPipelineRun.Labels["appstudio.openshift.io/environment"]).
-				To(Equal(hasEnv.Name))
-
-			Expect(newIntegrationPipelineRun.Spec.Workspaces != nil).To(BeTrue())
-			Expect(len(newIntegrationPipelineRun.Spec.Workspaces) > 0).To(BeTrue())
-			Expect(newIntegrationPipelineRun.Spec.Workspaces[0].Name).To(Equal("cluster-credentials"))
-			Expect(newIntegrationPipelineRun.Spec.Workspaces[0].Secret.SecretName).
-				To(Equal(deploymentTarget.Spec.KubernetesClusterCredentials.ClusterCredentialsSecret))
-
-			Expect(len(newIntegrationPipelineRun.Spec.Params) > 0).To(BeTrue())
-			Expect(newIntegrationPipelineRun.Spec.Params[0].Name).To(Equal("NAMESPACE"))
-			Expect(newIntegrationPipelineRun.Spec.Params[0].Value.StringVal).
-				To(Equal(deploymentTarget.Spec.KubernetesClusterCredentials.DefaultNamespace))
-		})
-
 		It("provides parameters from IntegrationTestScenario to the PipelineRun", func() {
-			scenarioParams := []v1beta1.PipelineParameter{
+			scenarioParams := []v1beta2.PipelineParameter{
 				{
 					Name:  "ADDITIONAL_PARAMETER",
 					Value: "custom value",
@@ -458,7 +403,7 @@ var _ = Describe("Integration pipeline", func() {
 				To(Equal("false"))
 
 			Expect(string(newIntegrationBundlePipelineRun.Spec.PipelineRef.ResolverRef.Resolver)).To(Equal("bundles"))
-			Expect(len(newIntegrationBundlePipelineRun.Spec.PipelineRef.ResolverRef.Params)).To(Equal(3))
+			Expect(newIntegrationBundlePipelineRun.Spec.PipelineRef.ResolverRef.Params).To(HaveLen(3))
 		})
 	})
 
@@ -478,7 +423,7 @@ var _ = Describe("Integration pipeline", func() {
 
 		It("has set all parameters required for executing the EC pipeline", func() {
 			Expect(string(enterpriseContractPipelineRun.Spec.PipelineRef.ResolverRef.Resolver)).To(Equal("git"))
-			Expect(len(enterpriseContractPipelineRun.Spec.PipelineRef.ResolverRef.Params)).To(Equal(3))
+			Expect(enterpriseContractPipelineRun.Spec.PipelineRef.ResolverRef.Params).To(HaveLen(3))
 
 			Expect(enterpriseContractPipelineRun.Spec.Params[0].Name).To(Equal("SNAPSHOT"))
 			Expect(enterpriseContractPipelineRun.Spec.Params[1].Name).To(Equal("POLICY_CONFIGURATION"))
@@ -486,7 +431,7 @@ var _ = Describe("Integration pipeline", func() {
 		})
 
 		It("copies the annotations", func() {
-			its := v1beta1.IntegrationTestScenario{}
+			its := v1beta2.IntegrationTestScenario{}
 			its.Annotations = map[string]string{
 				"unrelated":                          "unrelated",
 				"test.appstudio.openshift.io/kind":   "kind",

@@ -23,7 +23,7 @@ jobs:
       - name: Set up Go 1.x
         uses: actions/setup-go@v5
         with:
-          go-version: "1.20"
+          go-version: "1.21"
       - name: Check out code into the Go module directory
         uses: actions/checkout@v4
         with:
@@ -35,11 +35,11 @@ jobs:
         env:
           GOROOT: ""
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           args: --timeout=10m
           only-new-issues: true
-      - uses: dominikh/staticcheck-action@v1.3.0
+      - uses: dominikh/staticcheck-action@v1.3.1
         with:
           version: "2023.1.3"
           install-go: false
@@ -53,13 +53,13 @@ jobs:
       - name: Set up Go 1.x
         uses: actions/setup-go@v5
         with:
-          go-version: "1.20"
+          go-version: "1.21"
       - name: Check out code into the Go module directory
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Cache Operator SDK ${{ env.OPERATOR_SDK_VERSION }}
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-operator-sdk
         with:
           path: ~/cache
@@ -81,7 +81,7 @@ jobs:
           make kustomize controller-gen
       - name: Cache go modules
         id: cache-mod
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -131,19 +131,7 @@ jobs:
         run: |
           make test
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-
-  docker:
-    name: Check docker build
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Check out code into the Go module directory
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check if dockerimage build is working
-        run: docker build -f ./Dockerfile .
-
+        uses: codecov/codecov-action@v4
   gitlint:
     name: Run gitlint checks
     runs-on: ubuntu-20.04

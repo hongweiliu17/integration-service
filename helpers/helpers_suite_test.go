@@ -20,11 +20,13 @@ import (
 	"context"
 	"go/build"
 	"path/filepath"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"testing"
 
-	"github.com/redhat-appstudio/integration-service/cache"
-	toolkit "github.com/redhat-appstudio/operator-toolkit/test"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/konflux-ci/integration-service/api/v1beta2"
+	"github.com/konflux-ci/integration-service/cache"
+	toolkit "github.com/konflux-ci/operator-toolkit/test"
 
 	"k8s.io/client-go/rest"
 
@@ -35,9 +37,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	releasev1alpha1 "github.com/konflux-ci/release-service/api/v1alpha1"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
-	releasev1alpha1 "github.com/redhat-appstudio/release-service/api/v1alpha1"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,6 +72,10 @@ var _ = BeforeSuite(func() {
 			),
 			filepath.Join(
 				build.Default.GOPATH,
+				"pkg", "mod", toolkit.GetRelativeDependencyPath("tektoncd/pipeline"), "config", "300-crds",
+			),
+			filepath.Join(
+				build.Default.GOPATH,
 				"pkg", "mod", toolkit.GetRelativeDependencyPath("application-api"), "config", "crd", "bases",
 			),
 		},
@@ -85,7 +90,7 @@ var _ = BeforeSuite(func() {
 	Expect(applicationapiv1alpha1.AddToScheme(clientsetscheme.Scheme)).To(Succeed())
 	Expect(tektonv1.AddToScheme(clientsetscheme.Scheme)).To(Succeed())
 	Expect(releasev1alpha1.AddToScheme(clientsetscheme.Scheme)).To(Succeed())
-	Expect(v1beta1.AddToScheme(clientsetscheme.Scheme)).To(Succeed())
+	Expect(v1beta2.AddToScheme(clientsetscheme.Scheme)).To(Succeed())
 
 	k8sManager, _ := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: clientsetscheme.Scheme,

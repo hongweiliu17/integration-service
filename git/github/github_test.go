@@ -22,9 +22,9 @@ import (
 
 	"github.com/go-logr/logr"
 	ghapi "github.com/google/go-github/v45/github"
+	"github.com/konflux-ci/integration-service/git/github"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/redhat-appstudio/integration-service/git/github"
 )
 
 const samplePrivateKey = `-----BEGIN RSA PRIVATE KEY-----
@@ -144,7 +144,8 @@ func (MockRepositoriesService) ListStatuses(
 	var state = "success"
 	var description = "example-description"
 	var context = "example-context"
-	repoStatus := &ghapi.RepoStatus{ID: &id, State: &state, Description: &description, Context: &context}
+	var target_url = "https://example.com"
+	repoStatus := &ghapi.RepoStatus{ID: &id, State: &state, Description: &description, Context: &context, TargetURL: &target_url}
 	return []*ghapi.RepoStatus{repoStatus}, nil, nil
 }
 
@@ -177,6 +178,7 @@ var _ = Describe("Client", func() {
 		Repository:     "example-repo",
 		SHA:            "abcdef1",
 		ExternalID:     "example-external-id",
+		DetailsURL:     "https://example.com",
 		Conclusion:     "Passed",
 		Title:          "example-title",
 		Summary:        "example-summary",
@@ -192,6 +194,7 @@ var _ = Describe("Client", func() {
 		State:       "success",
 		Description: "example-description",
 		Context:     "example-context",
+		TargetURL:   "https://example.com",
 	}
 
 	BeforeEach(func() {
@@ -236,9 +239,16 @@ var _ = Describe("Client", func() {
 	})
 
 	It("can create commit statuses", func() {
-		id, err := client.CreateCommitStatus(context.TODO(), "", "", "", "", "", "")
+		id, err := client.CreateCommitStatus(context.TODO(), "", "", "", "", "", "", "")
 		Expect(err).To(BeNil())
 		Expect(id).To(Equal(int64(50)))
+	})
+
+	It("can set and get details URL", func() {
+		detilsURL := "https://example.com/details"
+
+		checkRunAdapter.DetailsURL = detilsURL
+		Expect(checkRunAdapter.DetailsURL).To(Equal(detilsURL))
 	})
 
 	It("can create check runs", func() {
@@ -281,30 +291,17 @@ var _ = Describe("Client", func() {
 
 		allCheckRuns, err := client.GetAllCheckRunsForRef(context.TODO(), "", "", "", 1)
 		Expect(err).To(BeNil())
-		Expect(len(allCheckRuns) > 0).To(BeTrue())
+		Expect(allCheckRuns).NotTo(BeEmpty())
 
 		existingCheckRun := client.GetExistingCheckRun(allCheckRuns, checkRunAdapter)
 		Expect(existingCheckRun).NotTo(BeNil())
 
-		checkRunAdapter = &github.CheckRunAdapter{
-			Name:           "example-name",
-			Owner:          "example-owner",
-			Repository:     "example-repo",
-			SHA:            "abcdef1",
-			ExternalID:     "example-external-id",
-			Conclusion:     "failure",
-			Title:          "example-title",
-			Summary:        "example-summary",
-			Text:           "example-text-update",
-			StartTime:      time.Now(),
-			CompletionTime: time.Now(),
-		}
 	})
 
 	It("can check if creating a new commit status is needed", func() {
 		commitStatuses, err := client.GetAllCommitStatusesForRef(context.TODO(), "", "", "")
 		Expect(err).To(BeNil())
-		Expect(len(commitStatuses) > 0).To(BeTrue())
+		Expect(commitStatuses).NotTo(BeEmpty())
 
 		commitStatusExist, err := client.CommitStatusExists(commitStatuses, commitStatusAdapter)
 		Expect(commitStatusExist).To(BeTrue())
@@ -317,6 +314,7 @@ var _ = Describe("Client", func() {
 			State:       "failure",
 			Description: "example-description",
 			Context:     "example-context",
+			TargetURL:   "https://example.com",
 		}
 		commitStatusExist, err = client.CommitStatusExists(commitStatuses, commitStatusAdapter)
 		Expect(commitStatusExist).To(BeFalse())
@@ -326,7 +324,7 @@ var _ = Describe("Client", func() {
 	It("can get existing comment id", func() {
 		comments, err := client.GetAllCommentsForPR(context.TODO(), "", "", 1)
 		Expect(err).To(BeNil())
-		Expect(len(comments) > 0).To(BeTrue())
+		Expect(comments).NotTo(BeEmpty())
 
 		commentID := client.GetExistingCommentID(comments, "snapshotName", "scenarioName")
 		Expect(*commentID).To(Equal(int64(40)))

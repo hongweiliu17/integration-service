@@ -19,10 +19,10 @@ package cache
 import (
 	"context"
 
+	"github.com/konflux-ci/integration-service/api/v1beta2"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
 
-	releasev1alpha1 "github.com/redhat-appstudio/release-service/api/v1alpha1"
+	releasev1alpha1 "github.com/konflux-ci/release-service/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -45,26 +45,6 @@ func SetupReleaseCache(mgr ctrl.Manager) error {
 
 	return mgr.GetCache().IndexField(context.Background(), &releasev1alpha1.Release{},
 		"spec.snapshot", releaseIndexFunc)
-}
-
-// SetupBindingEnvironmentCache adds a new index field to be able to search SnapshotEnvironmentBindings by Environment.
-func SetupBindingEnvironmentCache(mgr ctrl.Manager) error {
-	bindingEnvironmentIndexFunc := func(obj client.Object) []string {
-		return []string{obj.(*applicationapiv1alpha1.SnapshotEnvironmentBinding).Spec.Environment}
-	}
-
-	return mgr.GetCache().IndexField(context.Background(), &applicationapiv1alpha1.SnapshotEnvironmentBinding{},
-		"spec.environment", bindingEnvironmentIndexFunc)
-}
-
-// SetupBindingApplicationCache adds a new index field to be able to search SnapshotEnvironmentBindings by Application.
-func SetupBindingApplicationCache(mgr ctrl.Manager) error {
-	bindingApplicationIndexFunc := func(obj client.Object) []string {
-		return []string{obj.(*applicationapiv1alpha1.SnapshotEnvironmentBinding).Spec.Application}
-	}
-
-	return mgr.GetCache().IndexField(context.Background(), &applicationapiv1alpha1.SnapshotEnvironmentBinding{},
-		"spec.application", bindingApplicationIndexFunc)
 }
 
 // SetupApplicationComponentCache adds a new index field to be able to search Components by application.
@@ -90,9 +70,9 @@ func SetupSnapshotCache(mgr ctrl.Manager) error {
 // SetupIntegrationTestScenarioCache adds a new index field to be able to search IntegrationTestScenarios by Application.
 func SetupIntegrationTestScenarioCache(mgr ctrl.Manager) error {
 	integrationTestScenariosIndexFunc := func(obj client.Object) []string {
-		return []string{obj.(*v1beta1.IntegrationTestScenario).Spec.Application}
+		return []string{obj.(*v1beta2.IntegrationTestScenario).Spec.Application}
 	}
 
-	return mgr.GetCache().IndexField(context.Background(), &v1beta1.IntegrationTestScenario{},
+	return mgr.GetCache().IndexField(context.Background(), &v1beta2.IntegrationTestScenario{},
 		"spec.application", integrationTestScenariosIndexFunc)
 }

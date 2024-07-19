@@ -19,27 +19,47 @@ package status
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"strings"
 	"text/template"
 
-	"github.com/redhat-appstudio/integration-service/helpers"
+	"github.com/go-logr/logr"
+	"github.com/konflux-ci/integration-service/helpers"
+	"knative.dev/pkg/apis"
 )
 
 const commentTemplate = `### {{ .Title }}
 
 {{ .Summary }}`
 
-const summaryTemplate = `| Task | Duration | Test Suite | Status | Details |
+const summaryTemplate = `
+{{- $pipelineRunName := .PipelineRunName -}} {{ $namespace := .Namespace -}} {{ $logger := .Logger -}}
+<ul>
+<li><b>Pipelinerun</b>: <a href="{{ formatPipelineURL $pipelineRunName $namespace $logger }}">{{ $pipelineRunName }}</a></li>
+</ul>
+<hr>
+
+| Task | Duration | Test Suite | Status | Details |
 | --- | --- | --- | --- | --- |
 {{- range $tr := .TaskRuns }}
-| {{ formatTaskName $tr }} | {{ $tr.GetDuration.String }} | {{ formatNamespace $tr }} | {{ formatStatus $tr }} | {{ formatDetails $tr }} |
+| <a href="{{ formatTaskLogURL $tr $pipelineRunName $namespace $logger }}">{{ formatTaskName $tr }}</a> | {{ $tr.GetDuration.String }} | {{ formatNamespace $tr }} | {{ formatStatus $tr }} | {{ formatDetails $tr }} |
 {{- end }}
 
 {{ formatFootnotes .TaskRuns }}`
 
 // SummaryTemplateData holds the data necessary to construct a PipelineRun summary.
 type SummaryTemplateData struct {
-	TaskRuns []*helpers.TaskRun
+	TaskRuns        []*helpers.TaskRun
+	PipelineRunName string
+	Namespace       string
+	Logger          logr.Logger
+}
+
+// TaskLogTemplateData holds the data necessary to construct a Task log URL.
+type TaskLogTemplateData struct {
+	TaskName        string
+	PipelineRunName string
+	Namespace       string
 }
 
 // CommentTemplateData holds the data necessary to construct a PipelineRun comment.
@@ -48,17 +68,19 @@ type CommentTemplateData struct {
 	Summary string
 }
 
-// FormatSummary builds a markdown summary for a list of integration TaskRuns.
-func FormatSummary(taskRuns []*helpers.TaskRun) (string, error) {
+// FormatTestsSummary builds a markdown summary for a list of integration TaskRuns.
+func FormatTestsSummary(taskRuns []*helpers.TaskRun, pipelineRunName string, namespace string, logger logr.Logger) (string, error) {
 	funcMap := template.FuncMap{
-		"formatTaskName":  FormatTaskName,
-		"formatNamespace": FormatNamespace,
-		"formatStatus":    FormatStatus,
-		"formatDetails":   FormatDetails,
-		"formatFootnotes": FormatFootnotes,
+		"formatTaskName":    FormatTaskName,
+		"formatNamespace":   FormatNamespace,
+		"formatStatus":      FormatStatus,
+		"formatDetails":     FormatDetails,
+		"formatPipelineURL": FormatPipelineURL,
+		"formatTaskLogURL":  FormatTaskLogURL,
+		"formatFootnotes":   FormatFootnotes,
 	}
 	buf := bytes.Buffer{}
-	data := SummaryTemplateData{TaskRuns: taskRuns}
+	data := SummaryTemplateData{TaskRuns: taskRuns, PipelineRunName: pipelineRunName, Namespace: namespace, Logger: logger}
 	t := template.Must(template.New("").Funcs(funcMap).Parse(summaryTemplate))
 	if err := t.Execute(&buf, data); err != nil {
 		return "", err
@@ -66,26 +88,10 @@ func FormatSummary(taskRuns []*helpers.TaskRun) (string, error) {
 	return buf.String(), nil
 }
 
-// FormatCommentForFinishedPipelineRun builds a markdown comment for a list of finished integration TaskRuns
-func FormatCommentForFinishedPipelineRun(title string, results []*helpers.TaskRun) (string, error) {
-	summary, err := FormatSummary(results)
-	if err != nil {
-		return "", err
-	}
-
+// FormatComment build a markdown comment with the details in text
+func FormatComment(title, text string) (string, error) {
 	buf := bytes.Buffer{}
-	data := CommentTemplateData{Title: title, Summary: summary}
-	t := template.Must(template.New("").Parse(commentTemplate))
-	if err := t.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// FormatCommentForDetail build a markdown comment for the details of unfinished integrationTest
-func FormatCommentForDetail(title, detail string) (string, error) {
-	buf := bytes.Buffer{}
-	data := CommentTemplateData{Title: title, Summary: detail}
+	data := CommentTemplateData{Title: title, Summary: text}
 	t := template.Must(template.New("").Parse(commentTemplate))
 	if err := t.Execute(&buf, data); err != nil {
 		return "", err
@@ -100,11 +106,20 @@ func FormatStatus(taskRun *helpers.TaskRun) (string, error) {
 		return "", err
 	}
 
+	var emoji string
 	if result == nil || result.TestOutput == nil {
-		return "", nil
+		taskSucceededReason := taskRun.GetStatusCondition(string(apis.ConditionSucceeded)).GetReason()
+		switch taskSucceededReason {
+		case "Succeeded":
+			emoji = ":heavy_check_mark:"
+		case "Failed":
+			emoji = ":x:"
+		default:
+			emoji = ":question:"
+		}
+		return fmt.Sprintf(emoji+" Reason: %s", taskSucceededReason), nil
 	}
 
-	var emoji string
 	switch result.TestOutput.Result {
 	case helpers.AppStudioTestOutputSuccess:
 		emoji = ":heavy_check_mark:"
@@ -149,7 +164,6 @@ func FormatNamespace(taskRun *helpers.TaskRun) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	if result == nil || result.TestOutput == nil {
 		return "", nil
 	}
@@ -165,19 +179,23 @@ func FormatDetails(taskRun *helpers.TaskRun) (string, error) {
 	}
 
 	if result == nil {
-		return "", nil
+		var emoji string
+		taskSucceededReason := taskRun.GetStatusCondition(string(apis.ConditionSucceeded)).GetReason()
+		switch taskSucceededReason {
+		case "Succeeded":
+			emoji = ":heavy_check_mark:"
+		case "Failed":
+			emoji = ":x:"
+		default:
+			emoji = ":question:"
+		}
+		return fmt.Sprintf(emoji+" Reason: %s", taskSucceededReason), nil
 	}
 
 	if result.ValidationError != nil {
 		return fmt.Sprintf("Invalid result: %s", result.ValidationError), nil
 	}
-
-	if result.TestOutput == nil {
-		return "", nil
-	}
-
 	details := []string{}
-
 	if result.TestOutput.Successes > 0 {
 		details = append(details, fmt.Sprint(":heavy_check_mark: ", result.TestOutput.Successes, " success(es)"))
 	}
@@ -211,4 +229,36 @@ func FormatFootnotes(taskRuns []*helpers.TaskRun) (string, error) {
 		}
 	}
 	return strings.Join(footnotes, "\n"), nil
+}
+
+// FormatPipelineURL accepts a name of application, pipelinerun, namespace and returns a complete pipelineURL.
+func FormatPipelineURL(pipelinerun string, namespace string, logger logr.Logger) string {
+	console_url := os.Getenv("CONSOLE_URL")
+	if console_url == "" {
+		return "https://CONSOLE_URL_NOT_AVAILABLE"
+	}
+	buf := bytes.Buffer{}
+	data := SummaryTemplateData{PipelineRunName: pipelinerun, Namespace: namespace}
+	t := template.Must(template.New("").Parse(console_url))
+	if err := t.Execute(&buf, data); err != nil {
+		logger.Error(err, "Error occured when executing template.")
+	}
+	return buf.String()
+}
+
+// FormatTaskLogURL accepts name of pipelinerun, task, namespace and returns a complete task log URL.
+func FormatTaskLogURL(taskRun *helpers.TaskRun, pipelinerun string, namespace string, logger logr.Logger) string {
+	consoleTaskLogURL := os.Getenv("CONSOLE_URL_TASKLOG")
+	if consoleTaskLogURL == "" {
+		return "https://CONSOLE_URL_TASKLOG_NOT_AVAILABLE"
+	}
+
+	taskName := taskRun.GetPipelineTaskName()
+	buf := bytes.Buffer{}
+	data := TaskLogTemplateData{PipelineRunName: pipelinerun, TaskName: taskName, Namespace: namespace}
+	t := template.Must(template.New("").Parse(consoleTaskLogURL))
+	if err := t.Execute(&buf, data); err != nil {
+		logger.Error(err, "Error occured when executing task log template.")
+	}
+	return buf.String()
 }

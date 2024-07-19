@@ -18,16 +18,18 @@ package gitops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/konflux-ci/integration-service/helpers"
+	"github.com/konflux-ci/integration-service/pkg/metrics"
+	"github.com/konflux-ci/integration-service/tekton"
+	"github.com/konflux-ci/operator-toolkit/metadata"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/metrics"
-	"github.com/redhat-appstudio/integration-service/tekton"
-	"github.com/redhat-appstudio/operator-toolkit/metadata"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,6 +40,12 @@ import (
 const (
 	// PipelinesAsCodePrefix contains the prefix applied to labels and annotations copied from Pipelines as Code resources.
 	PipelinesAsCodePrefix = "pac.test.appstudio.openshift.io"
+
+	// TestLabelPrefix contains the prefix applied to labels and annotations related to testing.
+	TestLabelPrefix = "test.appstudio.openshift.io"
+
+	// CustomLabelPrefix contains the prefix applied to custom user-defined labels and annotations.
+	CustomLabelPrefix = "custom.appstudio.openshift.io"
 
 	// SnapshotTypeLabel contains the type of the Snapshot.
 	SnapshotTypeLabel = "test.appstudio.openshift.io/type"
@@ -57,8 +65,14 @@ const (
 	// SnapshotTestScenarioLabel contains json data with test results of the particular snapshot
 	SnapshotTestsStatusAnnotation = "test.appstudio.openshift.io/status"
 
-	// SnapshotPRLastUpdate contains timestamp of last time PR was updated
+	// (Deprecated) SnapshotPRLastUpdate contains timestamp of last time PR was updated
 	SnapshotPRLastUpdate = "test.appstudio.openshift.io/pr-last-update"
+
+	// SnapshotGitSourceRepoURLAnnotation contains URL of the git source repository (usually needed for forks)
+	SnapshotGitSourceRepoURLAnnotation = "test.appstudio.openshift.io/source-repo-url"
+
+	// SnapshotStatusReportAnnotation contains metadata of tests related to status reporting to git provider
+	SnapshotStatusReportAnnotation = "test.appstudio.openshift.io/git-reporter-status"
 
 	// BuildPipelineRunPrefix contains the build pipeline run related labels and annotations
 	BuildPipelineRunPrefix = "build.appstudio"
@@ -75,14 +89,17 @@ const (
 	// SnapshotComponentType is the type of Snapshot which was created for a single component build.
 	SnapshotComponentType = "component"
 
-	// SnapshotCompositeType is the type of Snapshot which was created for multiple components.
-	SnapshotCompositeType = "composite"
+	// SnapshotOverrideType is the type of Snapshot which was created for override Global Candidate List.
+	SnapshotOverrideType = "override"
 
 	// PipelineAsCodeEventTypeLabel is the type of event which triggered the pipelinerun in build service
 	PipelineAsCodeEventTypeLabel = PipelinesAsCodePrefix + "/event-type"
 
 	// PipelineAsCodeGitProviderLabel is the git provider which triggered the pipelinerun in build service.
 	PipelineAsCodeGitProviderLabel = PipelinesAsCodePrefix + "/git-provider"
+
+	// PipelineAsCodeGitProviderAnnotation is the git provider which triggered the pipelinerun in build service.
+	PipelineAsCodeGitProviderAnnotation = PipelinesAsCodePrefix + "/git-provider"
 
 	// PipelineAsCodeSHALabel is the commit which triggered the pipelinerun in build service.
 	PipelineAsCodeSHALabel = PipelinesAsCodePrefix + "/sha"
@@ -102,14 +119,32 @@ const (
 	// PipelineAsCodePullRequestAnnotation is the git repository's pull request identifier
 	PipelineAsCodePullRequestAnnotation = PipelinesAsCodePrefix + "/pull-request"
 
+	// PipelineAsCodeSourceProjectIDAnnotation is the source project ID for gitlab
+	PipelineAsCodeSourceProjectIDAnnotation = PipelinesAsCodePrefix + "/source-project-id"
+
+	// PipelineAsCodeTargetProjectIDAnnotation is the target project ID for gitlab
+	PipelineAsCodeTargetProjectIDAnnotation = PipelinesAsCodePrefix + "/target-project-id"
+
+	// PipelineAsCodeSHAAnnotation is the commit which triggered the pipelinerun in build service.
+	PipelineAsCodeSHAAnnotation = PipelinesAsCodePrefix + "/sha"
+
 	// PipelineAsCodePushType is the type of push event which triggered the pipelinerun in build service
 	PipelineAsCodePushType = "push"
+
+	// PipelineAsCodeGLPushType is the type of gitlab push event which triggered the pipelinerun in build service
+	PipelineAsCodeGLPushType = "Push"
 
 	// PipelineAsCodePullRequestType is the type of pull_request event which triggered the pipelinerun in build service
 	PipelineAsCodePullRequestType = "pull_request"
 
+	// PipelineAsCodeMergeRequestType is the type of merge request event which triggered the pipelinerun in build service
+	PipelineAsCodeMergeRequestType = "merge request"
+
 	// PipelineAsCodeGitHubProviderType is the git provider type for a GitHub event which triggered the pipelinerun in build service.
 	PipelineAsCodeGitHubProviderType = "github"
+
+	// PipelineAsCodeGitHubProviderType is the git provider type for a GitHub event which triggered the pipelinerun in build service.
+	PipelineAsCodeGitLabProviderType = "gitlab"
 
 	//AppStudioTestSucceededCondition is the condition for marking if the AppStudio Tests succeeded for the Snapshot.
 	AppStudioTestSucceededCondition = "AppStudioTestSucceeded"
@@ -122,13 +157,6 @@ const (
 
 	// LegacyIntegrationStatusCondition is the condition for marking the AppStudio integration status of the Snapshot.
 	LegacyIntegrationStatusCondition = "HACBSIntegrationStatus"
-
-	// IntegrationTestScenarioValid is the condition for marking the AppStudio integration status of the Scenario.
-	IntegrationTestScenarioValid = "IntegrationTestScenarioValid"
-
-	// SnapshotDeployedToRootEnvironmentsCondition is the condition for marking if Snapshot was deployed to root environments
-	// within the user's workspace.
-	SnapshotDeployedToRootEnvironmentsCondition = "DeployedToRootEnvironments"
 
 	// SnapshotAutoReleasedCondition is the condition for marking if Snapshot was auto-released released with AppStudio.
 	SnapshotAutoReleasedCondition = "AutoReleased"
@@ -148,9 +176,6 @@ const (
 
 	// AppStudioIntegrationStatusErrorOccured is the reason that's set when the AppStudio integration gets into an error state.
 	AppStudioIntegrationStatusErrorOccured = "ErrorOccured"
-
-	// AppStudioIntegrationStatusValid is the reason that's set when the AppStudio integration gets into an valid state.
-	AppStudioIntegrationStatusValid = "Valid"
 
 	//AppStudioIntegrationStatusInProgress is the reason that's set when the AppStudio tests gets into an in progress state.
 	AppStudioIntegrationStatusInProgress = "InProgress"
@@ -189,7 +214,7 @@ func IsSnapshotMarkedAsPassed(snapshot *applicationapiv1alpha1.Snapshot) bool {
 
 // MarkSnapshotAsPassed updates the AppStudio Test succeeded condition for the Snapshot to passed.
 // If the patch command fails, an error will be returned.
-func MarkSnapshotAsPassed(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotAsPassed(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	condition := metav1.Condition{
 		Type:    AppStudioTestSucceededCondition,
@@ -201,12 +226,12 @@ func MarkSnapshotAsPassed(adapterClient client.Client, ctx context.Context, snap
 
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	snapshotCompletionTime := &metav1.Time{Time: time.Now()}
 	go metrics.RegisterCompletedSnapshot(condition.Type, condition.Reason, snapshot.GetCreationTimestamp(), snapshotCompletionTime)
-	return snapshot, nil
+	return nil
 }
 
 // IsSnapshotMarkedAsFailed returns true if snapshot is marked as failed
@@ -216,7 +241,7 @@ func IsSnapshotMarkedAsFailed(snapshot *applicationapiv1alpha1.Snapshot) bool {
 
 // MarkSnapshotAsFailed updates the AppStudio Test succeeded condition for the Snapshot to failed.
 // If the patch command fails, an error will be returned.
-func MarkSnapshotAsFailed(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotAsFailed(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	condition := metav1.Condition{
 		Type:    AppStudioTestSucceededCondition,
@@ -228,25 +253,25 @@ func MarkSnapshotAsFailed(adapterClient client.Client, ctx context.Context, snap
 
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	snapshotCompletionTime := &metav1.Time{Time: time.Now()}
 	go metrics.RegisterCompletedSnapshot(condition.Type, condition.Reason, snapshot.GetCreationTimestamp(), snapshotCompletionTime)
-	return snapshot, nil
+	return nil
 }
 
 // MarkSnapshotAsInvalid updates the AppStudio integration status condition for the Snapshot to invalid.
 // If the patch command fails, an error will be returned.
-func MarkSnapshotAsInvalid(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotAsInvalid(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	SetSnapshotIntegrationStatusAsInvalid(snapshot, message)
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return snapshot, nil
+	return nil
 }
 
 // IsSnapshotMarkedAsInvalid returns true if snapshot is marked as failed
@@ -278,7 +303,8 @@ func SetSnapshotIntegrationStatusAsError(snapshot *applicationapiv1alpha1.Snapsh
 }
 
 // MarkSnapshotIntegrationStatusAsInProgress sets the AppStudio integration status condition for the Snapshot to In Progress.
-func MarkSnapshotIntegrationStatusAsInProgress(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotIntegrationStatusAsInProgress(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
+	log := log.FromContext(ctx)
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	meta.SetStatusCondition(&snapshot.Status.Conditions, metav1.Condition{
 		Type:    AppStudioIntegrationStatusCondition,
@@ -288,7 +314,7 @@ func MarkSnapshotIntegrationStatusAsInProgress(adapterClient client.Client, ctx 
 	})
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	snapshotInProgressTime := &metav1.Time{Time: time.Now()}
@@ -298,9 +324,15 @@ func MarkSnapshotIntegrationStatusAsInProgress(adapterClient client.Client, ctx 
 		buildPipelineRunFinishTime := time.Unix(buildPipelineRunFinishTimeInt, 0)
 		buildPipelineRunFinishTimeMeta := &metav1.Time{Time: buildPipelineRunFinishTime}
 
-		go metrics.RegisterIntegrationResponse(*buildPipelineRunFinishTimeMeta, snapshotInProgressTime)
+		duration := snapshotInProgressTime.Sub(buildPipelineRunFinishTimeMeta.Time)
+		log.Info("Integration Service Response time (integration_svc_response_seconds)",
+			"snapshot.name", snapshot.Name,
+			"pipelinerun.name", snapshot.Labels[BuildPipelineRunNameLabel],
+			"duration", duration,
+		)
+		go metrics.RegisterIntegrationResponse(duration)
 	}
-	return snapshot, nil
+	return nil
 }
 
 // PrepareToRegisterIntegrationPipelineRunStarted is to do preparation before calling RegisterPipelineRunStarted
@@ -310,8 +342,9 @@ func PrepareToRegisterIntegrationPipelineRunStarted(snapshot *applicationapiv1al
 	go metrics.RegisterPipelineRunStarted(snapshot.GetCreationTimestamp(), pipelineRunStartTime)
 }
 
-// SetSnapshotIntegrationStatusAsFinished sets the AppStudio integration status condition for the Snapshot to Finished.
-func SetSnapshotIntegrationStatusAsFinished(snapshot *applicationapiv1alpha1.Snapshot, message string) {
+// MarkSnapshotIntegrationStatusAsFinished sets the AppStudio integration status condition for the Snapshot to Finished.
+func MarkSnapshotIntegrationStatusAsFinished(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
+	patch := client.MergeFrom(snapshot.DeepCopy())
 	condition := metav1.Condition{
 		Type:    AppStudioIntegrationStatusCondition,
 		Status:  metav1.ConditionTrue,
@@ -319,6 +352,13 @@ func SetSnapshotIntegrationStatusAsFinished(snapshot *applicationapiv1alpha1.Sna
 		Message: message,
 	}
 	meta.SetStatusCondition(&snapshot.Status.Conditions, condition)
+
+	err := adapterClient.Status().Patch(ctx, snapshot, patch)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // IsSnapshotNotStarted checks if the AppStudio Integration Status condition is not in progress status.
@@ -357,6 +397,11 @@ func IsSnapshotValid(snapshot *applicationapiv1alpha1.Snapshot) bool {
 	return false
 }
 
+// IsSnapshotIntegrationStatusMarkedAsFinished returns true if snapshot is marked as finished
+func IsSnapshotIntegrationStatusMarkedAsFinished(snapshot *applicationapiv1alpha1.Snapshot) bool {
+	return IsSnapshotStatusConditionSet(snapshot, AppStudioIntegrationStatusCondition, metav1.ConditionTrue, AppStudioIntegrationStatusFinished)
+}
+
 // IsSnapshotStatusConditionSet checks if the condition with the conditionType in the status of Snapshot has been marked as the conditionStatus and reason.
 func IsSnapshotStatusConditionSet(snapshot *applicationapiv1alpha1.Snapshot, conditionType string, conditionStatus metav1.ConditionStatus, reason string) bool {
 	condition := meta.FindStatusCondition(snapshot.Status.Conditions, conditionType)
@@ -375,30 +420,6 @@ func IsSnapshotStatusConditionSet(snapshot *applicationapiv1alpha1.Snapshot, con
 	return true
 }
 
-// IsSnapshotMarkedAsDeployedToRootEnvironments returns true if snapshot is marked as deployed to root environments
-func IsSnapshotMarkedAsDeployedToRootEnvironments(snapshot *applicationapiv1alpha1.Snapshot) bool {
-	return IsSnapshotStatusConditionSet(snapshot, SnapshotDeployedToRootEnvironmentsCondition, metav1.ConditionTrue, "")
-}
-
-// MarkSnapshotAsDeployedToRootEnvironments updates the SnapshotDeployedToRootEnvironmentsCondition for the Snapshot to 'Deployed'.
-// If the patch command fails, an error will be returned.
-func MarkSnapshotAsDeployedToRootEnvironments(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
-	patch := client.MergeFrom(snapshot.DeepCopy())
-	condition := metav1.Condition{
-		Type:    SnapshotDeployedToRootEnvironmentsCondition,
-		Status:  metav1.ConditionTrue,
-		Reason:  "Deployed",
-		Message: message,
-	}
-	meta.SetStatusCondition(&snapshot.Status.Conditions, condition)
-
-	err := adapterClient.Status().Patch(ctx, snapshot, patch)
-	if err != nil {
-		return nil, err
-	}
-	return snapshot, nil
-}
-
 // IsSnapshotMarkedAsAutoReleased returns true if snapshot is marked as deployed to root environments
 func IsSnapshotMarkedAsAutoReleased(snapshot *applicationapiv1alpha1.Snapshot) bool {
 	return IsSnapshotStatusConditionSet(snapshot, SnapshotAutoReleasedCondition, metav1.ConditionTrue, "")
@@ -406,7 +427,7 @@ func IsSnapshotMarkedAsAutoReleased(snapshot *applicationapiv1alpha1.Snapshot) b
 
 // MarkSnapshotAsAutoReleased updates the SnapshotAutoReleasedCondition for the Snapshot to 'AutoReleased'.
 // If the patch command fails, an error will be returned.
-func MarkSnapshotAsAutoReleased(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotAsAutoReleased(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	condition := metav1.Condition{
 		Type:    SnapshotAutoReleasedCondition,
@@ -418,10 +439,10 @@ func MarkSnapshotAsAutoReleased(adapterClient client.Client, ctx context.Context
 
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return snapshot, nil
+	return nil
 }
 
 // IsSnapshotMarkedAsAddedToGlobalCandidateList returns true if snapshot's component is marked as added to global candidate list
@@ -431,7 +452,7 @@ func IsSnapshotMarkedAsAddedToGlobalCandidateList(snapshot *applicationapiv1alph
 
 // MarkSnapshotAsAddedToGlobalCandidateList updates the SnapshotAddedToGlobalCandidateListCondition for the Snapshot to true with reason 'Added'.
 // If the patch command fails, an error will be returned.
-func MarkSnapshotAsAddedToGlobalCandidateList(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, message string) (*applicationapiv1alpha1.Snapshot, error) {
+func MarkSnapshotAsAddedToGlobalCandidateList(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	condition := metav1.Condition{
 		Type:    SnapshotAddedToGlobalCandidateListCondition,
@@ -443,10 +464,10 @@ func MarkSnapshotAsAddedToGlobalCandidateList(adapterClient client.Client, ctx c
 
 	err := adapterClient.Status().Patch(ctx, snapshot, patch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return snapshot, nil
+	return nil
 }
 
 // ValidateImageDigest checks if image url contains valid digest, return error if check fails
@@ -511,7 +532,7 @@ func CanSnapshotBePromoted(snapshot *applicationapiv1alpha1.Snapshot) (bool, []s
 			canBePromoted = false
 			reasons = append(reasons, "the Snapshot is invalid")
 		}
-		if IsSnapshotCreatedByPACPullRequestEvent(snapshot) {
+		if !IsSnapshotCreatedByPACPushEvent(snapshot) {
 			canBePromoted = false
 			reasons = append(reasons, "the Snapshot was created for a PaC pull request event")
 		}
@@ -537,7 +558,7 @@ func NewSnapshot(application *applicationapiv1alpha1.Application, snapshotCompon
 // CompareSnapshots compares two Snapshots and returns boolean true if their images match exactly.
 func CompareSnapshots(expectedSnapshot *applicationapiv1alpha1.Snapshot, foundSnapshot *applicationapiv1alpha1.Snapshot) bool {
 	// Check if the snapshots are created by the same event type
-	if IsSnapshotCreatedByPACPullRequestEvent(expectedSnapshot) != IsSnapshotCreatedByPACPullRequestEvent(foundSnapshot) {
+	if !IsSnapshotCreatedBySamePACEvent(expectedSnapshot, foundSnapshot) {
 		return false
 	}
 	// If the number of components doesn't match, we immediately know that the snapshots are not equal.
@@ -562,9 +583,28 @@ func CompareSnapshots(expectedSnapshot *applicationapiv1alpha1.Snapshot, foundSn
 	return true
 }
 
-// IsSnapshotCreatedByPACPullRequestEvent checks if a snapshot has label PipelineAsCodeEventTypeLabel and with push value
-func IsSnapshotCreatedByPACPullRequestEvent(snapshot *applicationapiv1alpha1.Snapshot) bool {
-	return metadata.HasLabelWithValue(snapshot, PipelineAsCodeEventTypeLabel, PipelineAsCodePullRequestType)
+// IsSnapshotCreatedByPACPushEvent checks if a snapshot has label PipelineAsCodeEventTypeLabel and with push value
+// it the label doesn't exist for some manual snapshot
+func IsSnapshotCreatedByPACPushEvent(snapshot *applicationapiv1alpha1.Snapshot) bool {
+	return metadata.HasLabelWithValue(snapshot, PipelineAsCodeEventTypeLabel, PipelineAsCodePushType) ||
+		metadata.HasLabelWithValue(snapshot, PipelineAsCodeEventTypeLabel, PipelineAsCodeGLPushType) ||
+		!metadata.HasLabel(snapshot, PipelineAsCodeEventTypeLabel)
+}
+
+// IsSnapshotCreatedBySamePACEvent checks if the two snapshot are created by the same PAC event
+// or they don't have event type
+func IsSnapshotCreatedBySamePACEvent(snapshot1, snapshot2 *applicationapiv1alpha1.Snapshot) bool {
+	value1, ok1 := snapshot1.GetLabels()[PipelineAsCodeEventTypeLabel]
+	value2, ok2 := snapshot2.GetLabels()[PipelineAsCodeEventTypeLabel]
+	// if label exists and two snapshots have the same value
+	if ok1 && ok2 && value1 == value2 {
+		return true
+	}
+	// if label doesn't exist in two snapshot
+	if !ok1 && !ok2 {
+		return true
+	}
+	return false
 }
 
 // HasSnapshotTestingChangedToFinished returns a boolean indicating whether the Snapshot testing status has
@@ -620,7 +660,7 @@ func HasSnapshotRerunLabelChanged(objectOld, objectNew client.Object) bool {
 
 // PrepareSnapshot prepares the Snapshot for a given application, components and the updated component (if any).
 // In case the Snapshot can't be created, an error will be returned.
-func PrepareSnapshot(adapterClient client.Client, ctx context.Context, application *applicationapiv1alpha1.Application, applicationComponents *[]applicationapiv1alpha1.Component, component *applicationapiv1alpha1.Component, newContainerImage string, newComponentSource *applicationapiv1alpha1.ComponentSource) (*applicationapiv1alpha1.Snapshot, error) {
+func PrepareSnapshot(ctx context.Context, adapterClient client.Client, application *applicationapiv1alpha1.Application, applicationComponents *[]applicationapiv1alpha1.Component, component *applicationapiv1alpha1.Component, newContainerImage string, newComponentSource *applicationapiv1alpha1.ComponentSource) (*applicationapiv1alpha1.Snapshot, error) {
 	log := log.FromContext(ctx)
 	var snapshotComponents []applicationapiv1alpha1.SnapshotComponent
 	for _, applicationComponent := range *applicationComponents {
@@ -629,6 +669,15 @@ func PrepareSnapshot(adapterClient client.Client, ctx context.Context, applicati
 
 		var componentSource *applicationapiv1alpha1.ComponentSource
 		if applicationComponent.Name == component.Name {
+			// if the containerImage doesn't have a valid digest, we cannot construct a Snapshot
+			// for the given component
+			err := ValidateImageDigest(newContainerImage)
+			if err != nil {
+				log.Error(err, "component cannot be added to snapshot for application due to invalid digest in containerImage",
+					"component.Name", applicationComponent.Name,
+					"newContainerImage", newContainerImage)
+				return nil, errors.Join(helpers.NewInvalidImageDigestError(component.Name, newContainerImage), err)
+			}
 			containerImage = newContainerImage
 			componentSource = newComponentSource
 		} else {
@@ -643,25 +692,33 @@ func PrepareSnapshot(adapterClient client.Client, ctx context.Context, applicati
 		if containerImage == "" {
 			log.Info("component cannot be added to snapshot for application due to missing containerImage", "component.Name", applicationComponent.Name)
 			continue
+		} else {
+			// if the containerImage doesn't have a valid digest, the component
+			// will not be added to snapshot
+			err := ValidateImageDigest(containerImage)
+			if err != nil {
+				log.Error(err, "component cannot be added to snapshot for application due to invalid digest in containerImage", "component.Name", applicationComponent.Name)
+				continue
+			}
+			snapshotComponents = append(snapshotComponents, applicationapiv1alpha1.SnapshotComponent{
+				Name:           applicationComponent.Name,
+				ContainerImage: containerImage,
+				Source:         *componentSource,
+			})
 		}
-		// if the containerImage doesn't have a valid digest, the component
-		// will not be added to snapshot
-		err := ValidateImageDigest(containerImage)
-		if err != nil {
-			log.Error(err, "component cannot added to snapshot for application due to invalid digest in containerImage", "component.Name", applicationComponent.Name)
-			continue
-		}
-		snapshotComponents = append(snapshotComponents, applicationapiv1alpha1.SnapshotComponent{
-			Name:           applicationComponent.Name,
-			ContainerImage: containerImage,
-			Source:         *componentSource,
-		})
 	}
 
 	if len(snapshotComponents) == 0 {
-		return nil, fmt.Errorf("failed to prepare snapshot due to missing valid digest in containerImage for all components of application")
+		return nil, helpers.NewMissingValidComponentError(component.Name)
 	}
 	snapshot := NewSnapshot(application, &snapshotComponents)
+
+	// expose the source repo URL in the snapshot as annotation do we don't have to do lookup in integration tests
+	if newComponentSource.GitSource != nil {
+		if err := metadata.SetAnnotation(snapshot, SnapshotGitSourceRepoURLAnnotation, newComponentSource.GitSource.URL); err != nil {
+			return nil, fmt.Errorf("failed to set annotation %s: %w", SnapshotGitSourceRepoURLAnnotation, err)
+		}
+	}
 
 	err := ctrl.SetControllerReference(application, snapshot, adapterClient.Scheme())
 	if err != nil {
@@ -693,14 +750,14 @@ func GetComponentSourceFromComponent(component *applicationapiv1alpha1.Component
 }
 
 // GetIntegrationTestRunLabelValue returns value of the label responsible for re-running tests
-func GetIntegrationTestRunLabelValue(snapshot applicationapiv1alpha1.Snapshot) (string, bool) {
-	labels := snapshot.GetLabels()
+func GetIntegrationTestRunLabelValue(obj metav1.Object) (string, bool) {
+	labels := obj.GetLabels()
 	labelVal, ok := labels[SnapshotIntegrationTestRun]
 	return labelVal, ok
 }
 
 // RemoveIntegrationTestRerunLabel removes re-run label from snapshot
-func RemoveIntegrationTestRerunLabel(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot) error {
+func RemoveIntegrationTestRerunLabel(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	err := metadata.DeleteLabel(snapshot, SnapshotIntegrationTestRun)
 	if err != nil {
@@ -715,7 +772,7 @@ func RemoveIntegrationTestRerunLabel(adapterClient client.Client, ctx context.Co
 }
 
 // AddIntegrationTestRerunLabel adding re-run label to snapshot
-func AddIntegrationTestRerunLabel(adapterClient client.Client, ctx context.Context, snapshot *applicationapiv1alpha1.Snapshot, integrationTestScenarioName string) error {
+func AddIntegrationTestRerunLabel(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, integrationTestScenarioName string) error {
 	patch := client.MergeFrom(snapshot.DeepCopy())
 	newLabel := map[string]string{}
 	newLabel[SnapshotIntegrationTestRun] = integrationTestScenarioName
@@ -731,6 +788,7 @@ func AddIntegrationTestRerunLabel(adapterClient client.Client, ctx context.Conte
 	return nil
 }
 
+// Deprecated
 func GetLatestUpdateTime(snapshot *applicationapiv1alpha1.Snapshot) (time.Time, error) {
 	latestUpdateTime := snapshot.GetAnnotations()[SnapshotPRLastUpdate]
 	if latestUpdateTime == "" {
@@ -744,11 +802,66 @@ func GetLatestUpdateTime(snapshot *applicationapiv1alpha1.Snapshot) (time.Time, 
 	return t, nil
 }
 
-func SetLatestUpdateTime(snapshot *applicationapiv1alpha1.Snapshot, t time.Time) error {
-	byteVal, _ := t.MarshalText()
-	err := metadata.SetAnnotation(snapshot, SnapshotPRLastUpdate, string(byteVal))
-	if err != nil {
-		return fmt.Errorf("failed to set annotation for snapshot %w", err)
+func ResetSnapshotStatusConditions(ctx context.Context, adapterClient client.Client, snapshot *applicationapiv1alpha1.Snapshot, message string) error {
+	if HaveAppStudioTestsFinished(snapshot) {
+		patch := client.MergeFrom(snapshot.DeepCopy())
+		meta.SetStatusCondition(&snapshot.Status.Conditions, metav1.Condition{
+			Type:    AppStudioIntegrationStatusCondition,
+			Status:  metav1.ConditionUnknown,
+			Reason:  AppStudioIntegrationStatusInProgress,
+			Message: message,
+		})
+		meta.SetStatusCondition(&snapshot.Status.Conditions, metav1.Condition{
+			Type:    AppStudioTestSucceededCondition,
+			Status:  metav1.ConditionUnknown,
+			Reason:  AppStudioIntegrationStatusInProgress,
+			Message: message,
+		})
+
+		err := adapterClient.Status().Patch(ctx, snapshot, patch)
+		return err
 	}
+
 	return nil
+}
+
+// CopySnapshotLabelsAndAnnotations coppies labels and annotations from build pipelineRun or tested snapshot
+// into regular snapshot
+func CopySnapshotLabelsAndAnnotations(application *applicationapiv1alpha1.Application, snapshot *applicationapiv1alpha1.Snapshot, componentName string, source *metav1.ObjectMeta, prefixes []string) {
+
+	if snapshot.Labels == nil {
+		snapshot.Labels = map[string]string{}
+	}
+
+	if snapshot.Annotations == nil {
+		snapshot.Annotations = map[string]string{}
+	}
+	snapshot.Labels[SnapshotTypeLabel] = SnapshotComponentType
+
+	snapshot.Labels[SnapshotComponentLabel] = componentName
+	snapshot.Labels[ApplicationNameLabel] = application.Name
+
+	// Copy PAC annotations/labels from source(tested snapshot or pipelinerun) to snapshot.
+	_ = metadata.CopyLabelsWithPrefixReplacement(source, &snapshot.ObjectMeta, "pipelinesascode.tekton.dev", PipelinesAsCodePrefix)
+	_ = metadata.CopyAnnotationsWithPrefixReplacement(source, &snapshot.ObjectMeta, "pipelinesascode.tekton.dev", PipelinesAsCodePrefix)
+
+	for _, prefix := range prefixes {
+		// Copy labels and annotations prefixed with defined prefix
+		_ = metadata.CopyLabelsByPrefix(source, &snapshot.ObjectMeta, prefix)
+		_ = metadata.CopyAnnotationsByPrefix(source, &snapshot.ObjectMeta, prefix)
+	}
+
+}
+
+// IsOverrideSnapshot returns true if snapshot label 'test.appstudio.openshift.io/type' is 'override'
+func IsOverrideSnapshot(snapshot *applicationapiv1alpha1.Snapshot) bool {
+	return metadata.HasLabelWithValue(snapshot, SnapshotTypeLabel, SnapshotOverrideType)
+}
+
+func IsComponentSnapshot(snapshot *applicationapiv1alpha1.Snapshot) bool {
+	return metadata.HasLabelWithValue(snapshot, SnapshotTypeLabel, SnapshotComponentType)
+}
+
+func IsComponentSnapshotCreatedByPACPushEvent(snapshot *applicationapiv1alpha1.Snapshot) bool {
+	return IsComponentSnapshot(snapshot) && IsSnapshotCreatedByPACPushEvent(snapshot)
 }

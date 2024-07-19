@@ -19,22 +19,24 @@ package helpers_test
 import (
 	"bytes"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"time"
 
+	"github.com/konflux-ci/integration-service/api/v1beta2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/redhat-appstudio/integration-service/api/v1beta1"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 
+	"github.com/konflux-ci/integration-service/gitops"
+	"github.com/konflux-ci/integration-service/helpers"
 	applicationapiv1alpha1 "github.com/redhat-appstudio/application-api/api/v1alpha1"
-	"github.com/redhat-appstudio/integration-service/gitops"
-	"github.com/redhat-appstudio/integration-service/helpers"
 	"github.com/tonglil/buflogr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/apis"
 	v1 "knative.dev/pkg/apis/duck/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("Pipeline Adapter", Ordered, func() {
@@ -59,12 +61,12 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		hasComp                      *applicationapiv1alpha1.Component
 		hasApp                       *applicationapiv1alpha1.Application
 		hasSnapshot                  *applicationapiv1alpha1.Snapshot
-		integrationTestScenario      *v1beta1.IntegrationTestScenario
+		integrationTestScenario      *v1beta2.IntegrationTestScenario
 		sample_image                 string
 	)
 
 	BeforeAll(func() {
-		now = time.Now()
+		now = time.Now().Truncate(time.Second) // saved resources doesn't have subsecond values in timestamps
 
 		hasApp = &applicationapiv1alpha1.Application{
 			ObjectMeta: metav1.ObjectMeta{
@@ -97,7 +99,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Create(ctx, hasComp)).Should(Succeed())
 
-		integrationTestScenario = &v1beta1.IntegrationTestScenario{
+		integrationTestScenario = &v1beta2.IntegrationTestScenario{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "example-pass",
 				Namespace: "default",
@@ -106,11 +108,11 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 					"test.appstudio.openshift.io/optional": "false",
 				},
 			},
-			Spec: v1beta1.IntegrationTestScenarioSpec{
+			Spec: v1beta2.IntegrationTestScenarioSpec{
 				Application: "application-sample",
-				ResolverRef: v1beta1.ResolverRef{
+				ResolverRef: v1beta2.ResolverRef{
 					Resolver: "git",
-					Params: []v1beta1.ResolverParameter{
+					Params: []v1beta2.ResolverParameter{
 						{
 							Name:  "url",
 							Value: "https://github.com/redhat-appstudio/integration-examples.git",
@@ -123,13 +125,6 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 							Name:  "pathInRepo",
 							Value: "pipelineruns/integration_pipelinerun_pass.yaml",
 						},
-					},
-				},
-				Environment: v1beta1.TestEnvironment{
-					Name: "envname",
-					Type: "POC",
-					Configuration: &applicationapiv1alpha1.EnvironmentConfiguration{
-						Env: []applicationapiv1alpha1.EnvVarPair{},
 					},
 				},
 			},
@@ -170,7 +165,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 						Name: "TEST_OUTPUT",
 						Value: *tektonv1.NewStructuredValues(`{
 											"result": "SUCCESS",
-											"timestamp": "1665405318",
+											"timestamp": "2024-05-22T06:42:21+00:00",
 											"failures": 0,
 											"successes": 10,
 											"warnings": 0
@@ -215,7 +210,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 						Name: "TEST_OUTPUT",
 						Value: *tektonv1.NewStructuredValues(`{
 											"result": "FAILURE",
-											"timestamp": "1665405317",
+											"timestamp": "2024-05-22T06:42:21+00:00",
 											"failures": 1,
 											"successes": 0,
 											"warnings": 0
@@ -253,6 +248,8 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 
 		Expect(k8sClient.Create(ctx, skippedTaskRun)).Should(Succeed())
 
+		// The skipped taskRun uses the deprecated UNIX timestamp format which
+		// needs to be supported for backwards compatibility
 		skippedTaskRun.Status = tektonv1.TaskRunStatus{
 			TaskRunStatusFields: tektonv1.TaskRunStatusFields{
 				StartTime:      &metav1.Time{Time: now.Add(5 * time.Minute)},
@@ -308,7 +305,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 						Name: "TEST_OUTPUT",
 						Value: *tektonv1.NewStructuredValues(`{
 							"result": "WARNING",
-							"timestamp": "1665405320",
+							"timestamp": "2024-05-22T06:42:21+00:00",
 							"failures": 0,
 							"successes": 0,
 							"warnings": 1
@@ -673,7 +670,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		integrationTaskRun := helpers.NewTaskRunFromTektonTaskRun("task-success", &successfulTaskRun.Status)
 		Expect(integrationTaskRun).NotTo(BeNil())
 		Expect(integrationTaskRun.GetPipelineTaskName()).To(Equal("task-success"))
-		Expect(integrationTaskRun.GetStartTime().Equal(now))
+		Expect(integrationTaskRun.GetStartTime()).To(Equal(now))
 		Expect(integrationTaskRun.GetDuration().Minutes()).To(Equal(5.0))
 
 		integrationTaskRun = helpers.NewTaskRunFromTektonTaskRun("task-instant", &emptyTaskRun.Status)
@@ -709,13 +706,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeTrue())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
 		Expect(pipelineRunOutcome.GetValidationErrorsList()).Should(BeEmpty())
 
-		gitops.MarkSnapshotAsPassed(k8sClient, ctx, hasSnapshot, "test passed")
+		err = gitops.MarkSnapshotAsPassed(ctx, k8sClient, hasSnapshot, "test passed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeTrue())
 	})
 
@@ -745,13 +743,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeTrue())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
 		Expect(pipelineRunOutcome.GetValidationErrorsList()).Should(BeEmpty())
 
-		gitops.MarkSnapshotAsPassed(k8sClient, ctx, hasSnapshot, "test passed")
+		err = gitops.MarkSnapshotAsPassed(ctx, k8sClient, hasSnapshot, "test passed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeTrue())
 	})
 
@@ -766,13 +765,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		})
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeFalse())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
 		Expect(pipelineRunOutcome.GetValidationErrorsList()).Should(BeEmpty())
 
-		gitops.MarkSnapshotAsFailed(k8sClient, ctx, hasSnapshot, "test failed")
+		err = gitops.MarkSnapshotAsFailed(ctx, k8sClient, hasSnapshot, "test failed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeFalse())
 	})
 
@@ -802,13 +802,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeFalse())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
 		Expect(pipelineRunOutcome.GetValidationErrorsList()).Should(BeEmpty())
 
-		gitops.MarkSnapshotAsFailed(k8sClient, ctx, hasSnapshot, "test failed")
+		err = gitops.MarkSnapshotAsFailed(ctx, k8sClient, hasSnapshot, "test failed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeFalse())
 	})
 
@@ -842,7 +843,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeFalse())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
@@ -881,13 +882,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
 
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeFalse())
 		Expect(pipelineRunOutcome.HasPipelineRunValidTestOutputs()).To(BeTrue())
 		Expect(pipelineRunOutcome.GetValidationErrorsList()).Should(BeEmpty())
 
-		gitops.MarkSnapshotAsPassed(k8sClient, ctx, hasSnapshot, "test passed")
+		err = gitops.MarkSnapshotAsPassed(ctx, k8sClient, hasSnapshot, "test passed")
+		Expect(err).To(Succeed())
 		Expect(gitops.HaveAppStudioTestsSucceeded(hasSnapshot)).To(BeTrue())
 	})
 
@@ -917,7 +919,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome).NotTo(BeNil())
 		Expect(pipelineRunOutcome.HasPipelineRunPassedTesting()).To(BeFalse())
@@ -956,7 +958,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		}
 
 		Expect(k8sClient.Status().Update(ctx, integrationPipelineRun)).Should(Succeed())
-		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(k8sClient, ctx, integrationPipelineRun)
+		pipelineRunOutcome, err := helpers.GetIntegrationPipelineRunOutcome(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(pipelineRunOutcome).NotTo(BeNil())
 
@@ -993,14 +995,14 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 			},
 		}
 
-		taskRuns, err := helpers.GetAllChildTaskRunsForPipelineRun(k8sClient, ctx, integrationPipelineRun)
+		taskRuns, err := helpers.GetAllChildTaskRunsForPipelineRun(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
-		Expect(len(taskRuns)).To(Equal(2))
+		Expect(taskRuns).To(HaveLen(2))
 
 		// We expect the tasks to be sorted by start time
 		tr1 := taskRuns[0]
 		Expect(tr1.GetPipelineTaskName()).To(Equal("pipeline1-task1"))
-		Expect(tr1.GetStartTime().Equal(now))
+		Expect(tr1.GetStartTime()).To(Equal(now))
 		Expect(tr1.GetDuration().Minutes()).To(Equal(5.0))
 
 		result1, err := tr1.GetTestResult()
@@ -1014,7 +1016,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 		Expect(result1).To(Equal(result2))
 
 		tr2 := taskRuns[1]
-		Expect(tr2.GetStartTime().Equal(now.Add(5 * time.Minute)))
+		Expect(tr2.GetStartTime()).To(Equal(now.Add(5 * time.Minute)))
 		Expect(tr2.GetDuration().Minutes()).To(Equal(5.0))
 
 		result3, err := tr2.GetTestResult()
@@ -1029,8 +1031,53 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 			PipelineRunStatusFields: tektonv1.PipelineRunStatusFields{},
 		}
 
-		taskRuns, err := helpers.GetAllChildTaskRunsForPipelineRun(k8sClient, ctx, integrationPipelineRun)
+		taskRuns, err := helpers.GetAllChildTaskRunsForPipelineRun(ctx, k8sClient, integrationPipelineRun)
 		Expect(err).To(BeNil())
 		Expect(taskRuns).To(BeNil())
 	})
+
+	It("can remove finalizer from an IntegrationTestScenario", func() {
+		var buf bytes.Buffer
+
+		var patch = client.MergeFrom(integrationTestScenario.DeepCopy())
+		if ok := controllerutil.AddFinalizer(integrationTestScenario, helpers.IntegrationTestScenarioFinalizer); ok {
+			_ = k8sClient.Patch(ctx, integrationTestScenario, patch)
+		}
+		Expect(integrationTestScenario.Finalizers).To(ContainElement(ContainSubstring(helpers.IntegrationTestScenarioFinalizer)))
+
+		// calling RemoveFinalizerFromScenario() when the IntegrationTestScenario contains the finalizer
+		log := helpers.IntegrationLogger{Logger: buflogr.NewWithBuffer(&buf)}
+		Expect(helpers.RemoveFinalizerFromScenario(ctx, k8sClient, log, integrationTestScenario, helpers.IntegrationTestScenarioFinalizer)).To(Succeed())
+		Expect(integrationTestScenario.Finalizers).NotTo(ContainElement(ContainSubstring(helpers.IntegrationTestScenarioFinalizer)))
+		logEntry := "Removed Finalizer from the IntegrationTestScenario"
+		Expect(buf.String()).Should(ContainSubstring(logEntry))
+	})
+
+	It("can add and remove finalizer from a component", func() {
+		var buf bytes.Buffer
+
+		// calling AddFinalizerToComponent() when the Component doesn't contain the finalizer
+		log := helpers.IntegrationLogger{Logger: buflogr.NewWithBuffer(&buf)}
+		Expect(helpers.AddFinalizerToComponent(ctx, k8sClient, log, hasComp, helpers.ComponentFinalizer)).To(Succeed())
+		Expect(hasComp.Finalizers).To(ContainElement(ContainSubstring(helpers.ComponentFinalizer)))
+		logEntry := "Added Finalizer to the Component"
+		Expect(buf.String()).Should(ContainSubstring(logEntry))
+
+		// calling RemoveFinalizerFromComponent() when the Component contains the finalizer
+		Expect(helpers.RemoveFinalizerFromComponent(ctx, k8sClient, log, hasComp, helpers.ComponentFinalizer)).To(Succeed())
+		Expect(hasComp.Finalizers).NotTo(ContainElement(ContainSubstring(helpers.ComponentFinalizer)))
+		logEntry = "Removed Finalizer from the Component"
+		Expect(buf.String()).Should(ContainSubstring(logEntry))
+	})
+
+	It("Returns RequeueWithError if the object is less than timeout threshold", func() {
+		hasCompTimeout := time.Duration(3 * time.Hour)
+
+		result := helpers.IsObjectYoungerThanThreshold(hasComp, hasCompTimeout)
+		Expect(result).To(BeTrue())
+		hasComp.CreationTimestamp = metav1.NewTime(time.Now().Add(-1 * hasCompTimeout))
+		result = helpers.IsObjectYoungerThanThreshold(hasComp, hasCompTimeout)
+		Expect(result).To(BeFalse())
+	})
+
 })
