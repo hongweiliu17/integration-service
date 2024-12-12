@@ -729,6 +729,7 @@ var _ = Describe("Pipeline Adapter", Ordered, func() {
 			unexpectedLogEntry := "Created new Snapshot"
 			Expect(buf.String()).ShouldNot(ContainSubstring(unexpectedLogEntry))
 
+			Expect(buf.String()).ShouldNot(ContainSubstring(unexpectedLogEntry))
 			// check the behavior when there is only one Snapshot associated with the build pipelineRun
 			adapter.context = toolkit.GetMockedContext(ctx, []toolkit.MockData{
 				{

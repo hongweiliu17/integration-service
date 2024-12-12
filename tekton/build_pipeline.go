@@ -36,6 +36,8 @@ const (
 	// main branch in github/gitlab
 	MainBranch = "main"
 
+	PipelineAsCodeInstallationIDAnnotation = "pipelinesascode.tekton.dev/installation-id"
+
 	// PipelineAsCodeSourceBranchAnnotation is the branch name of the the pull request is created from
 	PipelineAsCodeSourceBranchAnnotation = "pipelinesascode.tekton.dev/source-branch"
 
@@ -45,9 +47,26 @@ const (
 	// PipelineAsCodePullRequestLabel is the type of event which triggered the pipelinerun in build service
 	PipelineAsCodePullRequestLabel = "pipelinesascode.tekton.dev/pull-request"
 
-	// SnapshotCreationReportAnnotation contains metadata of snapshot creation status reporting to git provider
-	// to initialize integration test
-	SnapshotCreationReportAnnotation = "test.appstudio.openshift.io/snapshot-creation-report"
+	// PipelineAsCodeGitProviderAnnotation is the git provider which triggered the pipelinerun in build service.
+	PipelineAsCodeGitProviderAnnotation = PipelinesAsCodePrefix + "/git-provider"
+
+	// PipelineAsCodeGitProviderLabel is the git provider which triggered the pipelinerun in build service.
+	PipelineAsCodeGitProviderLabel = PipelinesAsCodePrefix + "/git-provider"
+
+	// PipelineAsCodeGitProviderAnnotation contains the git provider attached via PaC (e.g., github, gitlab)
+	PipelineAsCodeGitSourceURLAnnotation = PipelinesAsCodePrefix + "/source-repo-url"
+
+	// IntegrationTestStatusPending represents the integration test status is initialized as pending status since build pipelineRuns is triggered
+	IntegrationTestStatusPending = "IntegrationTestStatusPending"
+
+	// SnapshotCreationFailed represents that snapshot creation fails
+	SnapshotCreationFailed = "SnapshotCreationFailed"
+
+	// BuildPLRFailed represents that the build plr fails
+	BuildPLRFailed = "BuildPLRFailed"
+
+	// Build PLR is in progress
+	BuildPLRInProgress = "BuildPLRInProgress"
 )
 
 // AnnotateBuildPipelineRun sets annotation for a build pipelineRun in defined context and returns that pipeline
@@ -125,12 +144,4 @@ func GenerateSHA(str string) string {
 // IsPLRCreatedByPACPushEvent checks if a PLR has label PipelineAsCodeEventTypeLabel and with push or Push value
 func IsPLRCreatedByPACPushEvent(plr *tektonv1.PipelineRun) bool {
 	return !metadata.HasLabel(plr, PipelineAsCodePullRequestLabel)
-}
-
-func IsIntegrationTestReportInitialized(plr *tektonv1.PipelineRun) bool {
-	return metadata.HasAnnotation(plr, SnapshotCreationReportAnnotation) && !h.HasPipelineRunFinished(plr)
-}
-
-func IsSnapshotCreationFailureReported(plr *tektonv1.PipelineRun) bool {
-	return metadata.HasAnnotationWithValue(plr, SnapshotCreationReportAnnotation, "") && h.HasPipelineRunSucceeded(plr)
 }
