@@ -13,7 +13,7 @@ metadata:
     appstudio.openshift.io/component: integration-service
     pipelines.appstudio.openshift.io/type: build
   name: integration-service-on-push
-  namespace: rhtap-integration-tenant
+  namespace: rh-ee-hongliu-tenant
 spec:
   params:
   - name: dockerfile
@@ -21,7 +21,7 @@ spec:
   - name: git-url
     value: '{{repo_url}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/rhtap-integration-tenant/integration-service/integration-service:{{revision}}
+    value: quay.io/redhat-user-workloads/rh-ee-hongliu-tenant/integration-service/integration-service:{{revision}}
   - name: path-context
     value: .
   - name: revision
