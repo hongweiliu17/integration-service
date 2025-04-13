@@ -23,7 +23,7 @@ require (
 	github.com/xanzy/go-gitlab v0.109.0
 	go.uber.org/mock v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+	golang.org/x/exp 7e4ce0ab07d0
 	golang.org/x/oauth2 v0.25.0
 	k8s.io/api v0.29.13
 	k8s.io/apimachinery v0.29.13
