@@ -239,7 +239,7 @@ func GenerateTestReport(ctx context.Context, client client.Client, detail intgte
 		return nil, fmt.Errorf("failed to generate text message: %w", err)
 	}
 
-	summary, err := GenerateSummary(detail.Status, testedSnapshot.Name, detail.ScenarioName)
+	summary, err := GenerateSummary(detail.Status, testedSnapshot.Name, detail.ScenarioName, componentName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate summary message: %w", err)
 	}
@@ -315,7 +315,7 @@ func generateText(ctx context.Context, client client.Client, integrationTestStat
 }
 
 // GenerateSummary returns summary for the given state, snapshotName and scenarioName
-func GenerateSummary(state intgteststat.IntegrationTestStatus, snapshotName, scenarioName string) (string, error) {
+func GenerateSummary(state intgteststat.IntegrationTestStatus, snapshotName, scenarioName, componentName string) (string, error) {
 	var summary string
 	var statusDesc string
 
@@ -348,10 +348,15 @@ func GenerateSummary(state intgteststat.IntegrationTestStatus, snapshotName, sce
 		return summary, fmt.Errorf("unknown status")
 	}
 
-	if state == intgteststat.BuildPLRInProgress || state == intgteststat.SnapshotCreationFailed || state == intgteststat.BuildPLRFailed || state == intgteststat.GroupSnapshotCreationFailed {
-		summary = fmt.Sprintf("Integration test for scenario %s %s", scenarioName, statusDesc)
+	if componentName == gitops.ComponentNameForGroupSnapshot {
+		componentName = gitops.ComponentNameForGroupSnapshot
 	} else {
-		summary = fmt.Sprintf("Integration test for snapshot %s and scenario %s %s", snapshotName, scenarioName, statusDesc)
+		componentName = "component " + componentName
+	}
+	if state == intgteststat.BuildPLRInProgress || state == intgteststat.SnapshotCreationFailed || state == intgteststat.BuildPLRFailed || state == intgteststat.GroupSnapshotCreationFailed {
+		summary = fmt.Sprintf("Integration test for %s snapshot scenario %s %s", componentName, scenarioName, statusDesc)
+	} else {
+		summary = fmt.Sprintf("Integration test for %s snapshot %s and scenario %s %s", componentName, snapshotName, scenarioName, statusDesc)
 	}
 
 	return summary, nil
